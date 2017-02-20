@@ -30,6 +30,8 @@ __FBSDID("$FreeBSD$");
 #include <efi.h>
 #include <efilib.h>
 
+#include "efidevp.h"
+
 static EFI_GUID ImageDevicePathGUID =
     EFI_LOADED_IMAGE_DEVICE_PATH_PROTOCOL_GUID;
 static EFI_GUID DevicePathGUID = DEVICE_PATH_PROTOCOL;

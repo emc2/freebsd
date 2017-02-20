@@ -32,9 +32,10 @@
 
 #include <stand.h>
 #include <sys/queue.h>
+#include <time.h>
 
 extern EFI_HANDLE		IH;
-extern EFI_SYSTEM_TABLE		*ST;
+extern EFI_SYSTEM_TABLE	        *ST;
 extern EFI_BOOT_SERVICES	*BS;
 extern EFI_RUNTIME_SERVICES	*RS;
 
@@ -65,9 +66,11 @@ pdinfo_list_t *efiblk_get_pdinfo_list(struct devsw *dev);
 void *efi_get_table(EFI_GUID *tbl);
 
 int efi_register_handles(struct devsw *, EFI_HANDLE *, EFI_HANDLE *, int);
+int efi_register_handle(struct devsw *, EFI_HANDLE, EFI_HANDLE);
 EFI_HANDLE efi_find_handle(struct devsw *, int);
 int efi_handle_lookup(EFI_HANDLE, struct devsw **, int *,  uint64_t *);
 int efi_handle_update_dev(EFI_HANDLE, struct devsw *, int, uint64_t);
+int efi_handle_remove_dev(EFI_HANDLE);
 
 EFI_DEVICE_PATH *efi_lookup_image_devpath(EFI_HANDLE);
 EFI_DEVICE_PATH *efi_lookup_devpath(EFI_HANDLE);
@@ -79,6 +82,7 @@ CHAR16 *efi_devpath_name(EFI_DEVICE_PATH *);
 void efi_free_devpath_name(CHAR16 *);
 
 int efi_status_to_errno(EFI_STATUS);
+EFI_STATUS errno_to_efi_status(int errno);
 
 void efi_time_init(void);
 void efi_time_fini(void);
@@ -94,5 +98,8 @@ void efi_init_environment(void);
 int wcscmp(CHAR16 *, CHAR16 *);
 void cpy8to16(const char *, CHAR16 *, size_t);
 void cpy16to8(const CHAR16 *, char *, size_t);
+
+time_t from_efi_time(EFI_TIME *efi_time);
+void to_efi_time(EFI_TIME *efi_time, time_t time);
 
 #endif	/* _LOADER_EFILIB_H */

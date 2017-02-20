@@ -86,6 +86,7 @@ void	init_zfs_bootenv(char *currdev);
 int	zfs_bootenv(const char *name);
 int	zfs_belist_add(const char *name, uint64_t __unused);
 int	zfs_set_env(void);
+int     zfs_dev_getdesc(struct zfs_devdesc *dev, char** out);
 
 extern struct devsw zfs_dev;
 extern struct fs_ops zfs_fsops;

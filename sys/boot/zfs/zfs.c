@@ -516,6 +516,31 @@ zfs_probe_dev(const char *devname, uint64_t *pool_guid)
 	return (ret);
 }
 
+int
+zfs_dev_getdesc(struct zfs_devdesc *dev, char **out)
+{
+        char *devname;
+        spa_t *spa;
+        int len;
+
+        spa = spa_find_by_guid(dev->pool_guid);
+
+        if (!spa)
+                return (ENXIO);
+
+        len = strlen(spa->spa_name) + 5;
+        devname = malloc(len);
+
+        if (devname == NULL) {
+                return (ENOMEM);
+        }
+
+        snprintf(devname, len, "zfs:%s", spa->spa_name);
+        *out = devname;
+
+        return (0);
+}
+
 /*
  * Print information about ZFS pools
  */
