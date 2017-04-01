@@ -41,52 +41,27 @@ struct entry {
 struct entry *entry;
 int nentries;
 
-static int
-get_next_unit(struct devsw *sw)
-{
-        int i, idx;
-
-        for (i = 0, idx = 0; i < nentries; i++) {
-                if (entry[i].dev == sw) {
-                        idx++;
-                }
-        }
-
-        return (idx);
-}
-
 int
 efi_register_handles(struct devsw *sw, EFI_HANDLE *handles,
     EFI_HANDLE *aliases, int count)
 {
 	size_t sz;
-	int idx, unit, i;
+	int idx, unit;
 
 	idx = nentries;
 	nentries += count;
 	sz = nentries * sizeof(struct entry);
-        unit = get_next_unit(sw);
 	entry = (entry == NULL) ? malloc(sz) : realloc(entry, sz);
-	for (i = 0; idx < nentries; idx++, unit++, i++) {
-		entry[idx].handle = handles[i];
+	for (unit = 0; idx < nentries; idx++, unit++) {
+		entry[idx].handle = handles[unit];
 		if (aliases != NULL)
-			entry[idx].alias = aliases[i];
+			entry[idx].alias = aliases[unit];
 		else
 			entry[idx].alias = NULL;
 		entry[idx].dev = sw;
 		entry[idx].unit = unit;
 	}
 	return (0);
-}
-
-int
-efi_register_handle(struct devsw *sw, EFI_HANDLE handle, EFI_HANDLE alias)
-{
-        if (alias == NULL) {
-                return efi_register_handles(sw, &handle, NULL, 1);
-        } else {
-                return efi_register_handles(sw, &handle, &alias, 1);
-        }
 }
 
 EFI_HANDLE
@@ -140,30 +115,4 @@ efi_handle_update_dev(EFI_HANDLE h, struct devsw *dev, int unit,
 	}
 
 	return (ENOENT);
-}
-
-int
-efi_handle_remove_dev(EFI_HANDLE h)
-{
-	int idx;
-
-        /* Find the entry */
-	for (idx = 0; idx < nentries; idx++) {
-		if (entry[idx].handle != h)
-			continue;
-	}
-
-        if (idx >= nentries)
-                return (ENOENT);
-        else if (idx == nentries - 1) {
-                nentries--;
-                entry = realloc(entry, nentries * sizeof(struct entry));
-        } else {
-                memcpy(entry + idx, entry + idx + 1,
-                       sizeof(struct entry) * (nentries - (idx + 1)));
-                nentries--;
-                entry = realloc(entry, nentries * sizeof(struct entry));
-        }
-
-        return (0);
 }

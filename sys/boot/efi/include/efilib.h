@@ -66,11 +66,9 @@ pdinfo_list_t *efiblk_get_pdinfo_list(struct devsw *dev);
 void *efi_get_table(EFI_GUID *tbl);
 
 int efi_register_handles(struct devsw *, EFI_HANDLE *, EFI_HANDLE *, int);
-int efi_register_handle(struct devsw *, EFI_HANDLE, EFI_HANDLE);
 EFI_HANDLE efi_find_handle(struct devsw *, int);
 int efi_handle_lookup(EFI_HANDLE, struct devsw **, int *,  uint64_t *);
 int efi_handle_update_dev(EFI_HANDLE, struct devsw *, int, uint64_t);
-int efi_handle_remove_dev(EFI_HANDLE);
 
 EFI_DEVICE_PATH *efi_lookup_image_devpath(EFI_HANDLE);
 EFI_DEVICE_PATH *efi_lookup_devpath(EFI_HANDLE);
