@@ -43,7 +43,9 @@ extern struct devsw efipart_fddev;
 extern struct devsw efipart_cddev;
 extern struct devsw efipart_hddev;
 extern struct devsw efinet_dev;
+extern struct devsw efifs_dev;
 extern struct netif_driver efinetif;
+extern struct fs_ops efifs_fsops;
 
 /* EFI block device data, included here to help efi_zfs_probe() */
 typedef STAILQ_HEAD(pdinfo_list, pdinfo) pdinfo_list_t;
@@ -93,7 +95,8 @@ void delay(int usecs);
 void efi_init_environment(void);
 
 /* CHAR16 utility functions. */
-int wcscmp(CHAR16 *, CHAR16 *);
+int wcscmp(const CHAR16 *, const CHAR16 *);
+size_t wcslen(const CHAR16 *s);
 void cpy8to16(const char *, CHAR16 *, size_t);
 void cpy16to8(const CHAR16 *, char *, size_t);
 

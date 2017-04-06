@@ -36,7 +36,7 @@ __FBSDID("$FreeBSD$");
  */
 
 int
-wcscmp(CHAR16 *a, CHAR16 *b)
+wcscmp(const CHAR16 *a, const CHAR16 *b)
 {
 
 	while (*a && *b && *a == *b) {
@@ -44,6 +44,16 @@ wcscmp(CHAR16 *a, CHAR16 *b)
 		b++;
 	}
 	return *a - *b;
+}
+
+size_t
+wcslen(const CHAR16 *s)
+{
+        size_t len;
+
+        for(len = 0; s[len] != '\0'; len++);
+
+        return len;
 }
 
 /*
