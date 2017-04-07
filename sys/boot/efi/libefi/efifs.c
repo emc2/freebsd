@@ -98,7 +98,6 @@ efifs_dev_init(void)
 	if (EFI_ERROR(status))
 		return (efi_status_to_errno(status));
 
-	/* Filter handles to only include FreeBSD partitions. */
 	nin = sz / sizeof(EFI_HANDLE);
 	unit = 0;
 
@@ -115,6 +114,7 @@ efifs_dev_init(void)
 
         free(handles);
 	free(hin);
+
 	return (err);
 }
 
@@ -129,27 +129,26 @@ efifs_dev_print(int verbose)
 	EFI_STATUS status;
 	u_int unit;
 
+        pager_output("efifs devices:");
+
 	for (unit = 0, h = efi_find_handle(&efifs_dev, 0);
 	    h != NULL; h = efi_find_handle(&efifs_dev, ++unit)) {
 		sprintf(line, "    %s%d:", efifs_dev.dv_name, unit);
 		pager_output(line);
                 pager_output("    EFI_SIMPLE_FILE_SYSTEM");
 
-                if (verbose) {
-                        status = BS->HandleProtocol(h, &DevicePathGUID,
-                            (void **)&devpath);
-                        if (!EFI_ERROR(status)) {
-                                name16 = efi_devpath_name(devpath);
-                                char buf[wcslen(name16) + 1];
-                                cpy16to8(name16, buf, wcslen(name16));
+                status = BS->HandleProtocol(h, &DevicePathGUID,
+                    (void **)&devpath);
+                if (!EFI_ERROR(status)) {
+                        name16 = efi_devpath_name(devpath);
+                        char buf[wcslen(name16) + 1];
+                        cpy16to8(name16, buf, wcslen(name16));
 
-                                /* Print out the device path if we have one */
-                                pager_output(", devpath = ");
-                                pager_output(buf);
-                        }
+                        /* Print out the device path if we have one */
+                        pager_output(" on ");
+                        pager_output(buf);
                 }
-
-		pager_output(")\n");
+		pager_output("\n");
 	}
         return (0);
 }
@@ -232,6 +231,9 @@ efifs_open(const char *upath, struct open_file *f)
 	EFI_FILE_HANDLE root;
         EFI_STATUS status;
         CHAR16 path[strlen(upath) + 1];
+
+	if (f->f_dev != &efifs_dev)
+		return (EINVAL);
 
 	dev = (struct devdesc *)(f->f_devdata);
         fsiface = dev->d_opendata;
