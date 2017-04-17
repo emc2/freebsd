@@ -91,6 +91,8 @@ EFI_STATUS main(int argc, CHAR16 *argv[]);
 void exit(EFI_STATUS status);
 void delay(int usecs);
 
+int efifs_parsedev(struct devdesc *, const char *, const char **);
+
 /* EFI environment initialization. */
 void efi_init_environment(void);
 

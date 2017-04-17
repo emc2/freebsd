@@ -168,8 +168,9 @@ efifs_dev_open(struct open_file *f, ...)
 
 	h = efi_find_handle(&efifs_dev, dev->d_unit);
 
-	if (h == NULL)
+	if (h == NULL) {
 		return (EINVAL);
+        }
 
         status = BS->OpenProtocol(h, &SimpleFileSystemProtocolGUID,
             (void**)&fsiface, IH, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
@@ -179,6 +180,7 @@ efifs_dev_open(struct open_file *f, ...)
         }
 
         dev->d_opendata = fsiface;
+
 	return (0);
 }
 
@@ -216,7 +218,6 @@ efifs_dev_strategy(void *devdata __unused, int rw __unused, daddr_t blk __unused
                    size_t size __unused, char *buf __unused,
                    size_t *rsize __unused)
 {
-        printf("Raw I/O not supported on EFI FS interface\n");
 	return ENOTSUP;
 }
 
@@ -232,8 +233,9 @@ efifs_open(const char *upath, struct open_file *f)
         EFI_STATUS status;
         CHAR16 path[strlen(upath) + 1];
 
-	if (f->f_dev != &efifs_dev)
+	if (f->f_dev != &efifs_dev) {
 		return (EINVAL);
+        }
 
 	dev = (struct devdesc *)(f->f_devdata);
         fsiface = dev->d_opendata;
@@ -242,13 +244,24 @@ efifs_open(const char *upath, struct open_file *f)
                 return (fsiface->OpenVolume(fsiface,
                            (EFI_FILE_HANDLE*)&(f->f_fsdata)));
         } else {
+                if (upath[0] == '/') {
+                        upath++;
+                }
+
                 status = fsiface->OpenVolume(fsiface, &root);
 
                 if (EFI_ERROR(status)) {
                         return (efi_status_to_errno(status));
                 }
 
-                cpy8to16(upath, path, sizeof(CHAR16) * strlen(upath));
+                cpy8to16(upath, path, strlen(upath));
+
+                for(int i = 0; path[i] != 0; i++) {
+                        if (path[i] == '/') {
+                                path[i] = '\\';
+                        }
+                }
+
                 status = root->Open(root, (EFI_FILE_HANDLE*)&(f->f_fsdata),
                     path, EFI_FILE_MODE_READ, 0);
                 root->Close(root);
@@ -504,6 +517,34 @@ efifs_readdir(struct open_file *f, struct dirent *d)
 
         free(finfo);
         entry->Close(entry);
+
+        return (0);
+}
+
+int
+efifs_parsedev(struct devdesc *dev, const char *devspec, const char **path)
+{
+        int unit;
+	const char *np;
+	char *cp;
+
+	np = devspec;
+	unit = -1;
+	if (*np != '\0' && *np != ':') {
+		unit = strtol(np, &cp, 10);
+
+		if (cp == np)
+			return (EUNIT);
+	} else
+		return (EINVAL);
+
+	if (*cp != '\0' && *cp != ':')
+		return (EINVAL);
+
+	dev->d_unit = unit;
+
+	if (path != NULL)
+		*path = (*cp == '\0') ? cp: cp + 1;
 
         return (0);
 }

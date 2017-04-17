@@ -138,6 +138,18 @@ efi_parsedev(struct devdesc **dev, const char *devspec, const char **path)
 		}
 		break;
 #endif
+        case DEVT_EFI:
+		idev = malloc(sizeof(struct devdesc));
+		if (idev == NULL)
+			return (ENOMEM);
+
+		err = efifs_parsedev((struct devdesc*)idev, np, path);
+		if (err != 0) {
+			free(idev);
+			return (err);
+		}
+                break;
+
 	default:
 		idev = malloc(sizeof(struct devdesc));
 		if (idev == NULL)
