@@ -289,14 +289,114 @@ static int parse_args(const int argc, char* argv[])
         return (0);
 }
 
-static size_t
-get_sig_strtab(Elf *elf)
+static bool
+prefer_type(GElf_Word old, GElf_Word new)
 {
+        /* Always prefer anything to NULL, and prefer a NOTE section
+         * over anything.
+         */
+        if (new == SHT_NULL || old == SHT_NOTE) {
+                return (false);
+        }
+        if (old == SHT_NULL || new == SHT_NOTE) {
+                return (true);
+        }
+
+        /* Next, prefer static information over anything else. */
+        if (new == SHT_SYMTAB || new == SHT_STRTAB) {
+                return (true);
+        }
+        if (old == SHT_SYMTAB || old == SHT_STRTAB) {
+                return (false);
+        }
+
+        /* Default: prefer newer over older */
+        return (true);
 }
 
+/* Try to find ".sign" in the strtab, or insert it if it's not there. */
 static size_t
+get_sign_idx(Elf_Scn *scn)
+{
+        Elf_Data *data;
+        char *strtab;
+        char *str;
+
+        data = elf_getdata(scn, NULL);
+        check_elf_error();
+        strtab = data->d_buf;
+        str = strstr(strtab, SIGN_NAME);
+
+        if (str == NULL) {
+                /* If ".sign" isn't in the strtab, add it */
+                Elf_Data *newdata = elf_newdata(scn);
+                size_t idx = data->d_off + data->d_size;
+
+                check_elf_error();
+                newdata->d_align = 1;
+                newdata->d_off = idx;
+                newdata->d_buf = strdup(SIGN_NAME);
+                newdata->d_size = sizeof (SIGN_NAME);
+                newdata->d_size = ELF_T_BYTE;
+
+                return (idx);
+        } else {
+                /* Otherwise, return the offset */
+                return (str - strtab);
+        }
+}
+
+/* Set the section name.  To do this, we need to figure out what
+ * strtab to use.
+ */
+static void
 set_sign_name(Elf *elf, GElf_Shdr *shdr)
 {
+        GElf_Ehdr ehdr;
+        Elf_Scn *curr = NULL;
+        GElf_Word type = SHT_NULL;
+        size_t idx = 0;
+        Elf_Scn *scn;
+
+        /* First, figure out which strtab section to use. */
+        gelf_getehdr(elf, &ehdr);
+        check_elf_error();
+
+        if (ehdr.e_shstrndx == SHN_UNDEF) {
+                /* This shouldn't happen, but check for it anyway. */
+                fprintf(stderr, "File contains no section header names\n");
+                exit(1);
+        } else if (ehdr.e_shstrndx != SHN_XINDEX) {
+                /* We're not using extended section numbering */
+                idx = ehdr.e_shstrndx;
+        } else {
+                /* Scan through the sections, looking for the best
+                 * strtab to use.
+                 */
+                for(curr = elf_nextscn(elf, curr); curr != NULL;
+                    curr = elf_nextscn(elf, curr)) {
+                        GElf_Shdr currshdr;
+
+                        check_elf_error();
+                        gelf_getshdr(curr, &currshdr);
+                        check_elf_error();
+
+                        /* If this section has a better type, update the
+                         * preferred index
+                         */
+                        if(prefer_type(currshdr.sh_type, type)) {
+                                type = currshdr.sh_type;
+                                idx = currshdr.sh_link;
+                        }
+                }
+
+                shdr->sh_link = idx;
+        }
+
+        /* Now find or create the index of the ".sign" string. */
+        scn = elf_getscn(elf, idx);
+        check_elf_error();
+        shdr->sh_name = get_sign_idx(scn);
 }
 
 static void
@@ -327,9 +427,16 @@ sign_elf(Elf *elf)
                 gelf_getshdr(scn, &shdr);
                 check_elf_error();
 
+                /* Set up the data */
+                data->d_align = 1;
+                data->d_off = 0;
+                data->d_size = sigsize;
+
                 /* Set the section name and type */
+                memset(&shdr, 0, sizeof (shdr));
                 shdr.sh_type = SHT_NOTE;
                 set_sign_name(elf, &shdr);
+                shdr.sh_size = sigsize;
 
                 /* Update the section data */
                 gelf_update_shdr(scn, &shdr);
@@ -347,7 +454,9 @@ sign_elf(Elf *elf)
         filedata = elf_rawfile(elf, &filesize);
         check_elf_error();
 
-        /* The section and data pointers aren't good anymore */
+        /* The section and data pointers aren't good after elf_update,
+         * so refresh them.
+         */
         scn = elf_getscn(elf, idx);
         check_elf_error();
         data = elf_getdata(scn, NULL);
@@ -358,13 +467,13 @@ sign_elf(Elf *elf)
         siglen = i2d_PKCS7(pkcs7, NULL);
 
         if(siglen != sigsize) {
-                fprintf(stderr, "Signature %zu is not expected %zu\n",
+                fprintf(stderr, "Signature size %zu is not expected %zu\n",
                     siglen, sigsize);
                 abort();
         }
 
+        /* Write back all the data. */
         i2d_PKCS7(pkcs7, data->d_buf);
-
         elf_update(elf, ELF_C_WRITE);
 }
 
