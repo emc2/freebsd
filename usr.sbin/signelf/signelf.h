@@ -41,6 +41,8 @@ __FBSDID("$FreeBSD$");
 #define DEFAULT_KEYPATH (DEFAULT_KEYDIR "default.pem")
 #define DEFAULT_PUBKEYPATH (DEFAULT_KEYDIR "default.pub.pem")
 
+#define SIGN_NAME ".sign"
+
 extern void usage(void);
 
 extern void check_elf_error(void);

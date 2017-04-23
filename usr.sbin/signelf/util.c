@@ -38,6 +38,8 @@ __FBSDID("$FreeBSD$");
 #include <libelf.h>
 #include <gelf.h>
 
+#include "signelf.h"
+
 void
 check_elf_error(void)
 {
@@ -72,7 +74,10 @@ find_sig(Elf *elf)
         check_elf_error();
 
         /* See elf(5) man page for meaning of this. */
-        if (ehdr.e_shstrndx == SHN_XINDEX) {
+        if (ehdr.e_shstrndx == SHN_UNDEF) {
+                fprintf(stderr, "File contains no section header names\n");
+                exit(1);
+        } else if (ehdr.e_shstrndx == SHN_XINDEX) {
                 link_strtab = true;
         } else {
                 strtabidx = ehdr.e_shstrndx;

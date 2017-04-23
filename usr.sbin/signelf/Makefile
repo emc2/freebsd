@@ -3,8 +3,8 @@
 .include <src.opts.mk>
 
 PROG=signelf
-SRCS=signelf.c sign.c verify.c
+SRCS=signelf.c sign.c verify.c util.c
 
-LIBADD=crypto
+LIBADD=crypto elf
 
 .include <bsd.prog.mk>
