@@ -182,7 +182,8 @@ _libelf_compute_section_extents(Elf *e, Elf_Scn *s, off_t rc)
 		 * Otherwise, we need to bring in the section's data
 		 * from the underlying ELF object.
 		 */
-		if (e->e_cmd != ELF_C_WRITE && elf_getdata(s, NULL) == NULL)
+		if (e->e_cmd != ELF_C_WRITE &&
+                    _libelf_getdata(s, NULL, true) == NULL)
 			return (0);
 	}
 
