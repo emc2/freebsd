@@ -93,7 +93,7 @@ find_sig(Elf *elf)
                 check_elf_error();
 
                 if(shdr.sh_type != SHT_NOTE) {
-                        break;
+                        continue;
                 }
 
                 /* See elf(5) man page for meaning of this. */

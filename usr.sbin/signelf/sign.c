@@ -55,6 +55,8 @@ __FBSDID("$FreeBSD$");
 
 #include "signelf.h"
 
+#define VPRINTF(...) (verbose ? fprintf(stderr, __VA_ARGS__) : 0)
+
 static char keypath[MAXPATHLEN + 1];
 static char pubpath[MAXPATHLEN + 1];
 static char **signpaths;
@@ -229,12 +231,11 @@ make_sig(void *buf, size_t len)
 {
         BIO *bio;
         PKCS7 *pkcs7;
+
         bio = BIO_new_mem_buf(buf, len);
-        check_ssl("computing signature size");
         pkcs7 = PKCS7_sign(sign_cert, sign_priv, NULL, bio,
-                    PKCS7_DETACHED | PKCS7_BINARY | PKCS7_NOCERTS |
-                    PKCS7_NOCHAIN | PKCS7_NOSMIMECAP);
-        check_ssl("computing signature size");
+            PKCS7_DETACHED | PKCS7_BINARY | PKCS7_NOCERTS |
+            PKCS7_NOCHAIN | PKCS7_NOSMIMECAP);
 
         return pkcs7;
 }
@@ -314,49 +315,225 @@ prefer_type(GElf_Word old, GElf_Word new)
         return (true);
 }
 
-/* Try to find ".sign" in the strtab, or insert it if it's not there. */
+/* Figure out if we can move the strtab and everything after it. */
+static bool
+strtab_mobile(Elf *elf, Elf_Scn *scn)
+{
+        Elf_Scn *curr;
+        GElf_Ehdr ehdr;
+        size_t phnum;
+
+        gelf_getehdr(elf, &ehdr);
+        check_elf_error();
+        phnum = ehdr.e_phnum;
+
+        /* Check the strtab and all sections that follow it. */
+        for (curr = scn; curr != NULL; curr = elf_nextscn(elf, curr)) {
+                GElf_Shdr shdr;
+                size_t idx;
+                size_t sbegin;
+                size_t send;
+
+                check_elf_error();
+                gelf_getshdr(curr, &shdr);
+                check_elf_error();
+                sbegin = shdr.sh_offset;
+                send = sbegin = shdr.sh_size;
+
+                /* Check if the current section's file offsets are
+                 * used in the program header at all.  If they are,
+                 * then we can't move them.
+                 */
+                for (idx = 0; idx < phnum; idx++) {
+                        GElf_Phdr phdr;
+                        size_t pbegin;
+                        size_t pend;
+
+                        gelf_getphdr(elf, idx, &phdr);
+                        check_elf_error();
+                        pbegin = phdr.p_offset;
+                        pend = pbegin = phdr.p_filesz;
+
+                        if ((pbegin <= sbegin && sbegin < pend) ||
+                            (pbegin <= send && send < pend)) {
+                                return (false);
+                        }
+                }
+        }
+
+        return (true);
+}
+
 static size_t
-get_sign_idx(Elf_Scn *scn)
+align(size_t offset, size_t align)
+{
+        if (offset == 0) {
+                return (0);
+        } else {
+                size_t mask = align - 1;
+
+                return (((offset - 1) & ~mask) + align);
+        }
+}
+
+static void
+strtab_fix_offsets(Elf *elf, Elf_Scn *scn)
+{
+        GElf_Ehdr ehdr;
+        GElf_Shdr shdr;
+        Elf_Scn *curr = scn;
+        size_t offset;
+        size_t shdr_start;
+        size_t shdr_size;
+        size_t shdr_end;
+        size_t aligned;
+
+        gelf_getehdr(elf, &ehdr);
+        check_elf_error();
+        shdr_start = ehdr.e_shoff;
+        shdr_size = ehdr.e_shnum * ehdr.e_shentsize;
+        shdr_end = shdr_start + shdr_size;
+        gelf_getshdr(curr, &shdr);
+        check_elf_error();
+        offset = shdr.sh_offset;
+
+        /* Fix up the offsets of the section and all sections that follow it */
+        while (curr != NULL) {
+                /* Grab all the data elements, so that they get
+                 * written back to the file when we update.
+                 * Otherwise, they'll get corrupted.
+                 */
+                Elf_Data *data;
+
+                for(data = elf_getdata(curr, NULL); data != NULL;
+                    data = elf_getdata(curr, data));
+
+                /* The section header might be between two offsets */
+                if ((offset <= shdr_start && shdr_start <= shdr.sh_offset) ||
+                    (offset <= shdr_end && shdr_end <= shdr.sh_offset) ||
+                    (shdr_start <= offset && offset <= shdr_end) ||
+                    (shdr_start <= shdr.sh_offset &&
+                     shdr.sh_offset <= shdr_end)) {
+                        aligned = align(offset, 8);
+                        ehdr.e_shoff = aligned;
+                        gelf_update_ehdr(elf, &ehdr);
+                        check_elf_error();
+                        offset = ehdr.e_shoff + shdr_size;
+                }
+
+                aligned = align(offset, shdr.sh_addralign);
+                shdr.sh_offset = aligned;
+
+                offset = shdr.sh_offset + shdr.sh_size;
+                gelf_update_shdr(curr, &shdr);
+                check_elf_error();
+                curr = elf_nextscn(elf, curr);
+                check_elf_error();
+
+                if (curr != NULL) {
+                        gelf_getshdr(curr, &shdr);
+                        check_elf_error();
+                }
+        }
+
+        /* The section header might have been at the very end */
+        if ((shdr_start <= offset && offset <= shdr_end)) {
+                aligned = align(offset, 8);
+                ehdr.e_shoff = aligned;
+                gelf_update_ehdr(elf, &ehdr);
+                check_elf_error();
+                offset += shdr_size;
+        }
+}
+
+static size_t
+strtab_insert_sign(Elf_Scn *scn)
+{
+        GElf_Shdr shdr;
+        Elf_Data *data;
+        char *strtab;
+        size_t idx;
+
+        data = elf_getdata(scn, NULL);
+        check_elf_error();
+        strtab = data->d_buf;
+        idx = data->d_size;
+        data->d_buf = realloc(data->d_buf, data->d_size + sizeof (SIGN_NAME));
+        check_malloc(data->d_buf);
+        strncpy((char *)data->d_buf + data->d_size, SIGN_NAME,
+            sizeof (SIGN_NAME));
+        data->d_size += sizeof (SIGN_NAME);
+
+        /* Update the section header */
+        gelf_getshdr(scn, &shdr);
+        check_elf_error();
+        shdr.sh_size += sizeof (SIGN_NAME);
+        gelf_update_shdr(scn, &shdr);
+        check_elf_error();
+
+        return (idx);
+}
+
+static size_t
+strtab_find_sign(Elf_Scn *scn)
 {
         Elf_Data *data;
         char *strtab;
+        size_t offset;
         char *str;
 
         data = elf_getdata(scn, NULL);
         check_elf_error();
         strtab = data->d_buf;
-        str = strstr(strtab, SIGN_NAME);
 
-        if (str == NULL) {
-                /* If ".sign" isn't in the strtab, add it */
-                Elf_Data *newdata = elf_newdata(scn);
-                size_t idx = data->d_off + data->d_size;
+        /* ELF conventions: offset 0 is the empty string, so we start at 1 */
+        for(offset = 1; offset < data->d_size;
+            offset += strlen(strtab + offset) + 1) {
+                str = strstr(strtab + offset, SIGN_NAME);
 
-                check_elf_error();
-                newdata->d_align = 1;
-                newdata->d_off = idx;
-                newdata->d_buf = strdup(SIGN_NAME);
-                newdata->d_size = sizeof (SIGN_NAME);
-                newdata->d_size = ELF_T_BYTE;
-
-                return (idx);
-        } else {
-                /* Otherwise, return the offset */
-                return (str - strtab);
+                if (str != NULL) {
+                        return (str - strtab);
+                }
         }
+
+        return (0);
+}
+
+/* Try to find ".sign" in the strtab, or insert it if it's not there. */
+static size_t
+get_sign_idx(Elf *elf, Elf_Scn *strtab)
+{
+        size_t idx;
+
+        if ((idx = strtab_find_sign(strtab)) == 0) {
+                /* If we can't resize the strtab, give up */
+                if (!strtab_mobile(elf, strtab)) {
+                        fprintf(stderr, "Cannot resize strtab");
+                        exit(1);
+                }
+
+                /* Insert ".sign" into the strtab and fixup all the
+                 * subsequent offsets.
+                 */
+                idx = strtab_insert_sign(strtab);
+                strtab_fix_offsets(elf, strtab);
+        }
+
+        return (idx);
 }
 
 /* Set the section name.  To do this, we need to figure out what
  * strtab to use.
  */
 static void
-set_sign_name(Elf *elf, GElf_Shdr *shdr)
+set_sign_name(Elf *elf, Elf_Scn *newscn)
 {
         GElf_Ehdr ehdr;
+        GElf_Shdr shdr;
         Elf_Scn *curr = NULL;
         GElf_Word type = SHT_NULL;
-        size_t idx = 0;
-        Elf_Scn *scn;
+        size_t sym, idx = 0;
+        Elf_Scn *strtab;
 
         /* First, figure out which strtab section to use. */
         gelf_getehdr(elf, &ehdr);
@@ -368,7 +545,7 @@ set_sign_name(Elf *elf, GElf_Shdr *shdr)
                 exit(1);
         } else if (ehdr.e_shstrndx != SHN_XINDEX) {
                 /* We're not using extended section numbering */
-                idx = ehdr.e_shstrndx;
+               idx = ehdr.e_shstrndx;
         } else {
                 /* Scan through the sections, looking for the best
                  * strtab to use.
@@ -390,26 +567,44 @@ set_sign_name(Elf *elf, GElf_Shdr *shdr)
                         }
                 }
 
-                shdr->sh_link = idx;
+                /* Set the link */
+                gelf_getshdr(newscn, &shdr);
+                check_elf_error();
+                shdr.sh_link = idx;
+                gelf_update_shdr(newscn, &shdr);
+                check_elf_error();
         }
 
+
         /* Now find or create the index of the ".sign" string. */
-        scn = elf_getscn(elf, idx);
+        strtab = elf_getscn(elf, idx);
         check_elf_error();
-        shdr->sh_name = get_sign_idx(scn);
+        sym = get_sign_idx(elf, strtab);
+
+        /* Set the name */
+        gelf_getshdr(newscn, &shdr);
+        check_elf_error();
+        shdr.sh_name = sym;
+        gelf_update_shdr(newscn, &shdr);
+        check_elf_error();
 }
 
 static void
 sign_elf(Elf *elf)
 {
-        size_t idx = find_sig(elf);
+        size_t idx;
         Elf_Scn *scn;
         Elf_Data *data;
-        char buf[sigsize];
+        unsigned char *buf;
         size_t filesize;
         void *filedata;
         PKCS7 *pkcs7;
         size_t siglen;
+
+        buf = malloc(sigsize);
+        check_malloc(buf);
+        idx = find_sig(elf);
+        elf_flagelf(elf, ELF_C_SET, ELF_F_LAYOUT);
 
         if (idx != 0) {
                 scn = elf_getscn(elf, idx);
@@ -418,29 +613,35 @@ sign_elf(Elf *elf)
                 check_elf_error();
         } else {
                 GElf_Shdr shdr;
+                GElf_Ehdr ehdr;
 
                 /* Create a new section */
                 scn = elf_newscn(elf);
+                idx = elf_ndxscn(scn);
                 check_elf_error();
-                data = elf_newdata(scn);
+                gelf_getehdr(elf, &ehdr);
                 check_elf_error();
-                gelf_getshdr(scn, &shdr);
+                ehdr.e_shnum += 1;
+                gelf_update_ehdr(elf, &ehdr);
                 check_elf_error();
 
                 /* Set up the data */
+                data = elf_newdata(scn);
+                check_elf_error();
                 data->d_align = 1;
                 data->d_off = 0;
                 data->d_size = sigsize;
 
                 /* Set the section name and type */
-                memset(&shdr, 0, sizeof (shdr));
-                shdr.sh_type = SHT_NOTE;
-                set_sign_name(elf, &shdr);
+                gelf_getshdr(scn, &shdr);
+                check_elf_error();
+                shdr.sh_type = SHT_PROGBITS;
                 shdr.sh_size = sigsize;
-
-                /* Update the section data */
+                shdr.sh_addralign = 1;
                 gelf_update_shdr(scn, &shdr);
                 check_elf_error();
+
+                set_sign_name(elf, scn);
         }
 
         /* Set the signature section to all zeros  */
@@ -449,7 +650,7 @@ sign_elf(Elf *elf)
         data->d_size = sigsize;
 
         /* Update the file and get a pointer to the raw data */
-        elf_update(elf, ELF_C_NULL);
+        elf_update(elf, ELF_C_WRITE);
         check_elf_error();
         filedata = elf_rawfile(elf, &filesize);
         check_elf_error();
@@ -457,6 +658,7 @@ sign_elf(Elf *elf)
         /* The section and data pointers aren't good after elf_update,
          * so refresh them.
          */
+        elf_nextscn(elf, NULL);
         scn = elf_getscn(elf, idx);
         check_elf_error();
         data = elf_getdata(scn, NULL);
@@ -464,6 +666,7 @@ sign_elf(Elf *elf)
 
         /* Actually compute the signature */
         pkcs7 = make_sig(filedata, filesize);
+
         siglen = i2d_PKCS7(pkcs7, NULL);
 
         if(siglen != sigsize) {
@@ -473,7 +676,9 @@ sign_elf(Elf *elf)
         }
 
         /* Write back all the data. */
-        i2d_PKCS7(pkcs7, data->d_buf);
+        buf = data->d_buf;
+        siglen = i2d_PKCS7(pkcs7, &buf);
+
         elf_update(elf, ELF_C_WRITE);
 }
 
@@ -487,28 +692,30 @@ sign_main(int argc, char *argv[])
         signpaths = malloc(max_signpaths * sizeof(signpaths[0]));
         err = parse_args(argc, argv);
 
-        if (verbose) {
-                fprintf(stderr, "Loading key from %s and cert from %s, signing",
-                        keypath, pubpath);
+        VPRINTF("Loading key from %s and cert from %s, signing",
+            keypath, pubpath);
 
-                for(i = 0; i < nsignpaths; i++) {
-                        fprintf(stderr, " %s", signpaths[i]);
-                }
-
-                fprintf(stderr, " %s\n",
-                    ephemeral ? "with ephemeral key" : "directly");
+        for(i = 0; i < nsignpaths; i++) {
+                VPRINTF(" %s", signpaths[i]);
         }
 
+        VPRINTF(" %s\n", ephemeral ? "with ephemeral key" : "directly\n");
         load_keys();
         write_ephemeral();
         compute_sigsize();
 
+        if (elf_version(EV_CURRENT) == EV_NONE) {
+                fprintf(stderr, "ELF library cannot handle version %u\n",
+                    EV_CURRENT);
+        }
+
         for(i = 0; i < nsignpaths; i++) {
-                int fd = open(signpaths[i], O_RDWR);
+                int fd;
                 Elf *elf;
 
+                VPRINTF("Signing %s\n", signpaths[i]);
+                fd = open(signpaths[i], O_RDWR);
                 check_fd_error(fd);
-                fprintf(stderr, " %s", signpaths[i]);
                 elf = elf_begin(fd, ELF_C_RDWR, NULL);
                 check_elf_error();
                 sign_elf(elf);
