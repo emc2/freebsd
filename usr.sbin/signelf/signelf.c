@@ -50,24 +50,16 @@ static const char * const usage_detail =
   "\n"
   "        -e <path>    Sign with ephemeral keys, save public key to file\n"
   "        -k <path>    Path to private (signing) key\n"
-  "        -p <path>    Path to public (verification) key\n"
+  "        -p <path>    Path to public (verification) key certificate\n"
   "        -v           Verbose mode\n"
   "\n"
   "    verify: check signatures on one or more executables or shared objects\n"
   "\n"
   "      Options:\n"
   "\n"
-  "        -d           Files are signed directly\n"
-  "        -n           Don't check signature chains\n"
-  "        -k <path>    Path to verification (public) key\n"
+  "        -p <path>    Path to public (verification) key certificate\n"
   "        -v           Verbose mode\n"
-  "\n"
-  "    unsign: delete signatures from one or more executables or shared objects\n"
-  "\n"
-  "      Options:\n"
-  "\n"
-  "        -q           Don't fail if a file doesn't contain a signature\n"
-  "        -v           Verbose mode\n";
+  "\n";
 
 void
 usage(void)

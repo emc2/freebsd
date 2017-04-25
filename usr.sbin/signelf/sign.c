@@ -47,7 +47,6 @@ __FBSDID("$FreeBSD$");
 #include <gelf.h>
 
 #include <openssl/bio.h>
-#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/pkcs7.h>
 #include <openssl/pem.h>
@@ -71,34 +70,6 @@ static size_t sigsize;
 static size_t first_resizable;
 
 static void
-check_malloc(const void *ptr) {
-        if (ptr == NULL) {
-                perror("Could not allocate memory");
-                abort();
-        }
-}
-
-static void
-check_file(const FILE *ptr, const char* str) {
-        if (ptr == NULL) {
-                perror(str);
-                exit(errno);
-        }
-}
-
-static void
-check_ssl(const char *op) {
-        unsigned long err = ERR_get_error();
-
-        if (err != 0) {
-                fprintf(stderr, "Error in %s (%s) while %s: %s\n",
-                    ERR_lib_error_string(err), ERR_func_error_string(err), op,
-                    ERR_reason_error_string(err));
-                exit(err);
-        }
-}
-
-static void
 add_signpath(char *signpath)
 {
         if (max_signpaths <= nsignpaths) {
@@ -106,7 +77,7 @@ add_signpath(char *signpath)
 
                 max_signpaths *= 2;
                 tmp = realloc(signpaths, max_signpaths * sizeof(signpaths[0]));
-                check_malloc(tmp);
+                check_malloc_error(tmp);
                 signpaths = tmp;
         }
 
@@ -141,16 +112,16 @@ load_keys(void)
 
         /* Load the private key */
         f = fopen(keypath, "r");
-        check_file(f, "Error opening private key");
+        check_file_error(f, "Error opening private key");
         priv = PEM_read_PrivateKey(f, NULL, NULL, NULL);
-        check_ssl("loading private key");
+        check_ssl_error("loading private key");
         fclose(f);
 
         /* Load the public key */
         f = fopen(pubpath, "r");
-        check_file(f, "Error opening public key");
+        check_file_error(f, "Error opening public key");
         cert = PEM_read_X509(f, NULL, NULL, NULL);
-        check_ssl("loading public key");
+        check_ssl_error("loading public key");
         fclose(f);
 
         if (ephemeral) {
@@ -159,48 +130,47 @@ load_keys(void)
                 EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(priv, NULL);
                 ASN1_INTEGER timestamp;
 
-                if (verbose) {
-                        fprintf(stderr, "Generating ephemeral key...");
-                }
+                VPRINTF("Generating ephemeral key...");
 
                 /* Generate the ephemeral private key */
-                check_ssl("generating ephemeral private key");
+                check_ssl_error("generating ephemeral private key");
                 EVP_PKEY_keygen_init(ctx);
-                check_ssl("generating ephemeral private key");
+                check_ssl_error("generating ephemeral private key");
                 EVP_PKEY_keygen(ctx, &sign_priv);
-                check_ssl("generating ephemeral private key");
+                check_ssl_error("generating ephemeral private key");
                 EVP_PKEY_CTX_free(ctx);
-                fprintf(stderr, "done\n");
+
+                VPRINTF("done\n");
 
                 /* Create ephemeral public key cert */
                 sign_cert = X509_new();
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 X509_set_pubkey(sign_cert, sign_priv);
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 X509_set_version(sign_cert, 2);
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 ASN1_INTEGER_set(&timestamp, time(NULL));
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 asntime = X509_get_notBefore(cert);
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 X509_set_notBefore(sign_cert, asntime);
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 asntime = X509_get_notAfter(cert);
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 X509_set_notAfter(sign_cert, asntime);
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 name = X509_get_subject_name(cert);
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 X509_set_subject_name(sign_cert, name);
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 name = X509_get_issuer_name(cert);
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
                 X509_set_issuer_name(sign_cert, name);
-                check_ssl("creating ephemeral public key cert");
+                check_ssl_error("creating ephemeral public key cert");
 
                 /* Sign ephemeral public key */
                 X509_sign(sign_cert, priv, EVP_sha256());
-                check_ssl("signing ephemeral public key");
+                check_ssl_error("signing ephemeral public key");
         } else {
                 sign_priv = priv;
                 sign_cert = cert;
@@ -213,15 +183,12 @@ write_ephemeral(void)
         if (ephemeral) {
                 FILE *f;
 
-                if (verbose) {
-                        fprintf(stderr, "Writing ephemeral key to %s\n",
-                            ephemeralpath);
-                }
+                VPRINTF("Writing ephemeral key to %s\n", ephemeralpath);
 
                 f = fopen(ephemeralpath, "w");
-                check_file(f, "Error writing ephemeral key");
+                check_file_error(f, "Error writing ephemeral key");
                 PEM_write_X509(f, sign_cert);
-                check_ssl("writing out ephemeral key");
+                check_ssl_error("writing out ephemeral key");
                 fclose(f);
 
         }
@@ -236,7 +203,7 @@ make_sig(void *buf, size_t len)
         bio = BIO_new_mem_buf(buf, len);
         pkcs7 = PKCS7_sign(sign_cert, sign_priv, NULL, bio,
             PKCS7_DETACHED | PKCS7_BINARY | PKCS7_NOCERTS |
-            PKCS7_NOCHAIN | PKCS7_NOSMIMECAP);
+            PKCS7_NOCHAIN | PKCS7_NOSMIMECAP | PKCS7_NOATTR);
 
         return pkcs7;
 }
@@ -249,7 +216,7 @@ compute_sigsize(void)
         PKCS7 *pkcs7 = make_sig(buf, sizeof(buf));
 
         len = i2d_PKCS7(pkcs7, NULL);
-        check_ssl("computing signature size");
+        check_ssl_error("computing signature size");
         sigsize = len;
         PKCS7_free(pkcs7);
 }
@@ -489,7 +456,7 @@ strtab_insert_sign(Elf_Scn *scn)
         strtab = data->d_buf;
         idx = data->d_size;
         data->d_buf = realloc(data->d_buf, data->d_size + sizeof (SIGN_NAME));
-        check_malloc(data->d_buf);
+        check_malloc_error(data->d_buf);
         strncpy((char *)data->d_buf + data->d_size, SIGN_NAME,
             sizeof (SIGN_NAME));
         data->d_size += sizeof (SIGN_NAME);
@@ -662,7 +629,7 @@ sign_elf(Elf *elf)
 
                         data->d_size = sigsize;
                         data->d_buf = realloc(data->d_buf, sigsize);
-                        check_malloc(data->d_buf);
+                        check_malloc_error(data->d_buf);
                 }
         } else {
                 /* Create the .sign section */
@@ -686,7 +653,7 @@ sign_elf(Elf *elf)
                 data->d_off = 0;
                 data->d_size = sigsize;
                 data->d_buf = malloc(sigsize);
-                check_malloc(data->d_buf);
+                check_malloc_error(data->d_buf);
 
                 /* Set the section name and type */
                 gelf_getshdr(scn, &shdr);
@@ -734,7 +701,6 @@ sign_elf(Elf *elf)
         /* Write back all the data. */
         buf = data->d_buf;
         siglen = i2d_PKCS7(pkcs7, &buf);
-
         elf_update(elf, ELF_C_WRITE);
 }
 
@@ -756,6 +722,7 @@ sign_main(int argc, char *argv[])
         }
 
         VPRINTF(" %s\n", ephemeral ? "with ephemeral key" : "directly\n");
+
         load_keys();
         write_ephemeral();
         compute_sigsize();

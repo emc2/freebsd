@@ -30,6 +30,7 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +41,8 @@ __FBSDID("$FreeBSD$");
 
 #include "signelf.h"
 
+#include <openssl/err.h>
+
 void
 check_elf_error(void)
 {
@@ -48,15 +51,43 @@ check_elf_error(void)
         if ((err = elf_errno()) != 0) {
                 fprintf(stderr, "Error handling ELF file: %s\n",
                     elf_errmsg(err));
-                exit(1);
+                exit(errno);
         }
 }
 
 void
 check_fd_error(int fd) {
-        if(fd < 0) {
+        if (fd < 0) {
                 perror("Error opening file");
-                exit(1);
+                exit(errno);
+        }
+}
+
+void
+check_file_error(const FILE *ptr, const char* str) {
+        if (ptr == NULL) {
+                perror(str);
+                exit(errno);
+        }
+}
+
+void
+check_malloc_error(const void *ptr) {
+        if (ptr == NULL) {
+                perror("Could not allocate memory");
+                abort();
+        }
+}
+
+void
+check_ssl_error(const char *op) {
+        unsigned long err = ERR_get_error();
+
+        if (err != 0) {
+                fprintf(stderr, "Error in %s (%s) while %s: %s\n",
+                    ERR_lib_error_string(err), ERR_func_error_string(err), op,
+                    ERR_reason_error_string(err));
+                exit(err);
         }
 }
 

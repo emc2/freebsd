@@ -33,13 +33,16 @@ __FBSDID("$FreeBSD$");
 #ifndef _SIGNELF_H_
 #define _SIGNELF_H_
 
+#include <stdio.h>
 #include <stdbool.h>
 
 #include <libelf.h>
 
-#define DEFAULT_KEYDIR "/etc/keys/"
-#define DEFAULT_KEYPATH (DEFAULT_KEYDIR "default.pem")
-#define DEFAULT_PUBKEYPATH (DEFAULT_KEYDIR "default.pub.pem")
+#define DEFAULT_TRUSTDIR "/etc/trust/"
+#define DEFAULT_PRIVDIR DEFAULT_TRUSTDIR "priv/"
+#define DEFAULT_CERTDIR DEFAULT_TRUSTDIR "certs/"
+#define DEFAULT_KEYPATH DEFAULT_PRIVDIR "local.pem"
+#define DEFAULT_PUBKEYPATH DEFAULT_CERTDIR "local.pub.pem"
 
 #define SIGN_NAME ".sign"
 
@@ -47,6 +50,9 @@ extern void usage(void);
 
 extern void check_elf_error(void);
 extern void check_fd_error(int fd);
+extern void check_file_error(const FILE *ptr, const char* str);
+extern void check_malloc_error(const void *ptr);
+extern void check_ssl_error(const char *op);
 
 extern size_t find_sig(Elf *elf);
 
