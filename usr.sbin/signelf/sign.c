@@ -68,6 +68,7 @@ static char ephemeralpath[MAXPATHLEN + 1];
 static EVP_PKEY *sign_priv;
 static X509 *sign_cert;
 static size_t sigsize;
+static size_t first_resizable;
 
 static void
 check_malloc(const void *ptr) {
@@ -315,30 +316,32 @@ prefer_type(GElf_Word old, GElf_Word new)
         return (true);
 }
 
-/* Figure out if we can move the strtab and everything after it. */
-static bool
-strtab_mobile(Elf *elf, Elf_Scn *scn)
+/* Figure out if the given section and everything after can be resized. */
+static void
+find_first_resizable(Elf *elf)
 {
         Elf_Scn *curr;
         GElf_Ehdr ehdr;
         size_t phnum;
+        size_t curridx;
 
         gelf_getehdr(elf, &ehdr);
         check_elf_error();
         phnum = ehdr.e_phnum;
 
-        /* Check the strtab and all sections that follow it. */
-        for (curr = scn; curr != NULL; curr = elf_nextscn(elf, curr)) {
+        /* Check the section and all sections that follow it. */
+        for (curridx = ehdr.e_shnum - 1; curridx > 0; curridx--) {
                 GElf_Shdr shdr;
                 size_t idx;
                 size_t sbegin;
                 size_t send;
 
+                curr = elf_getscn(elf, curridx);
                 check_elf_error();
                 gelf_getshdr(curr, &shdr);
                 check_elf_error();
                 sbegin = shdr.sh_offset;
-                send = sbegin = shdr.sh_size;
+                send = sbegin + shdr.sh_size;
 
                 /* Check if the current section's file offsets are
                  * used in the program header at all.  If they are,
@@ -352,16 +355,31 @@ strtab_mobile(Elf *elf, Elf_Scn *scn)
                         gelf_getphdr(elf, idx, &phdr);
                         check_elf_error();
                         pbegin = phdr.p_offset;
-                        pend = pbegin = phdr.p_filesz;
+                        pend = pbegin + phdr.p_filesz;
+
 
                         if ((pbegin <= sbegin && sbegin < pend) ||
-                            (pbegin <= send && send < pend)) {
-                                return (false);
+                            (pbegin <= send && send <= pend) ||
+                            (sbegin <= pbegin && pbegin < send) ||
+                            (sbegin <= pend && pend <= send)) {
+                                first_resizable = curridx + 1;
+                                return;
                         }
                 }
         }
 
-        return (true);
+        first_resizable = 0;
+}
+
+static bool
+section_resizable(Elf_Scn *scn)
+{
+        size_t idx;
+
+        idx = elf_ndxscn(scn);
+        check_elf_error();
+
+        return (idx >= first_resizable);
 }
 
 static size_t
@@ -377,21 +395,33 @@ align(size_t offset, size_t align)
 }
 
 static void
-strtab_fix_offsets(Elf *elf, Elf_Scn *scn)
+fix_offsets(Elf *elf)
 {
         GElf_Ehdr ehdr;
         GElf_Shdr shdr;
-        Elf_Scn *curr = scn;
+        Elf_Scn *curr;
         size_t offset;
         size_t shdr_start;
         size_t shdr_size;
         size_t shdr_end;
         size_t aligned;
+        size_t idx;
 
         gelf_getehdr(elf, &ehdr);
         check_elf_error();
         shdr_start = ehdr.e_shoff;
         shdr_size = ehdr.e_shnum * ehdr.e_shentsize;
+        idx = first_resizable;
+
+        /* This can happen if the very last section is not resizable,
+         * in which case we can't do anything at all here.
+         */
+        if (idx >= ehdr.e_shnum) {
+                return;
+        }
+
+        curr = elf_getscn(elf, idx);
+        check_elf_error();
         shdr_end = shdr_start + shdr_size;
         gelf_getshdr(curr, &shdr);
         check_elf_error();
@@ -501,13 +531,13 @@ strtab_find_sign(Elf_Scn *scn)
 
 /* Try to find ".sign" in the strtab, or insert it if it's not there. */
 static size_t
-get_sign_idx(Elf *elf, Elf_Scn *strtab)
+get_sign_idx(Elf_Scn *strtab)
 {
         size_t idx;
 
         if ((idx = strtab_find_sign(strtab)) == 0) {
                 /* If we can't resize the strtab, give up */
-                if (!strtab_mobile(elf, strtab)) {
+                if (!section_resizable(strtab)) {
                         fprintf(stderr, "Cannot resize strtab");
                         exit(1);
                 }
@@ -516,7 +546,6 @@ get_sign_idx(Elf *elf, Elf_Scn *strtab)
                  * subsequent offsets.
                  */
                 idx = strtab_insert_sign(strtab);
-                strtab_fix_offsets(elf, strtab);
         }
 
         return (idx);
@@ -579,7 +608,7 @@ set_sign_name(Elf *elf, Elf_Scn *newscn)
         /* Now find or create the index of the ".sign" string. */
         strtab = elf_getscn(elf, idx);
         check_elf_error();
-        sym = get_sign_idx(elf, strtab);
+        sym = get_sign_idx(strtab);
 
         /* Set the name */
         gelf_getshdr(newscn, &shdr);
@@ -601,17 +630,43 @@ sign_elf(Elf *elf)
         PKCS7 *pkcs7;
         size_t siglen;
 
-        buf = malloc(sigsize);
-        check_malloc(buf);
+        find_first_resizable(elf);
         idx = find_sig(elf);
         elf_flagelf(elf, ELF_C_SET, ELF_F_LAYOUT);
 
         if (idx != 0) {
+          fprintf(stderr, "Found section %zu\n", idx);
+                /* Resize the section and fixup offsets */
+                GElf_Shdr shdr;
+
                 scn = elf_getscn(elf, idx);
                 check_elf_error();
                 data = elf_getdata(scn, NULL);
                 check_elf_error();
+
+                if (data->d_size != sigsize) {
+                        if (!section_resizable(scn)) {
+                                fprintf(stderr,
+                                    "Cannot resize signature section\n");
+                                exit(1);
+                        }
+
+                        /* Set the section size and fix up all the
+                         * following sections
+                         */
+                        gelf_getshdr(scn, &shdr);
+                        check_elf_error();
+                        shdr.sh_size = sigsize;
+                        gelf_update_shdr(scn, &shdr);
+                        check_elf_error();
+                        fix_offsets(elf);
+
+                        data->d_size = sigsize;
+                        data->d_buf = realloc(data->d_buf, sigsize);
+                        check_malloc(data->d_buf);
+                }
         } else {
+                /* Create the .sign section */
                 GElf_Shdr shdr;
                 GElf_Ehdr ehdr;
 
@@ -631,6 +686,8 @@ sign_elf(Elf *elf)
                 data->d_align = 1;
                 data->d_off = 0;
                 data->d_size = sigsize;
+                data->d_buf = malloc(sigsize);
+                check_malloc(data->d_buf);
 
                 /* Set the section name and type */
                 gelf_getshdr(scn, &shdr);
@@ -642,11 +699,11 @@ sign_elf(Elf *elf)
                 check_elf_error();
 
                 set_sign_name(elf, scn);
+                fix_offsets(elf);
         }
 
         /* Set the signature section to all zeros  */
-        memset(buf, 0, sigsize);
-        data->d_buf = buf;
+        memset(data->d_buf, 0, sigsize);
         data->d_size = sigsize;
 
         /* Update the file and get a pointer to the raw data */
