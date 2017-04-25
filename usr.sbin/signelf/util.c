@@ -92,10 +92,6 @@ find_sig(Elf *elf)
                 gelf_getshdr(curr, &shdr);
                 check_elf_error();
 
-                if(shdr.sh_type != SHT_NOTE) {
-                        continue;
-                }
-
                 /* See elf(5) man page for meaning of this. */
                 if (link_strtab) {
                         strtabidx = shdr.sh_link;

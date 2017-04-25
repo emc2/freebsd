@@ -635,7 +635,6 @@ sign_elf(Elf *elf)
         elf_flagelf(elf, ELF_C_SET, ELF_F_LAYOUT);
 
         if (idx != 0) {
-          fprintf(stderr, "Found section %zu\n", idx);
                 /* Resize the section and fixup offsets */
                 GElf_Shdr shdr;
 
