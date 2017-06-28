@@ -132,8 +132,8 @@ base64_is_finished(const struct base64_state *state)
 }
 
 void
-base64_enc(struct base64_state *state, const void **srcp,
-    size_t *srclenp, void **dstp, size_t *dstlenp)
+base64_enc(struct base64_state *state, void **dstp, size_t *dstlenp,
+    const void **srcp, size_t *srclenp)
 {
         size_t srclen;
         size_t dstlen;

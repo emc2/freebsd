@@ -121,15 +121,15 @@ pem_write_line(struct pem_state *state, const void **srcp, size_t *srclenp,
         size_t remaining = init;
         size_t written;
 
-        base64_enc(&state->pem_b64, srcp, srclenp, dstp, &remaining);
+        base64_enc(&state->pem_b64, dstp, &remaining, srcp, srclenp);
         written = init - remaining;
         state->pem_remaining -= written;
         *dstlenp -= written;
 }
 
 static void
-pem_write_lines(struct pem_state *state, const void **srcp, size_t *srclenp,
-    void **dstp, size_t *dstlenp)
+pem_write_lines(struct pem_state *state, void **dstp, size_t *dstlenp,
+    const void **srcp, size_t *srclenp)
 {
         size_t dstlen = *dstlenp;
         size_t srclen = *srclenp;
@@ -142,7 +142,7 @@ pem_write_lines(struct pem_state *state, const void **srcp, size_t *srclenp,
                         const void* buf = "\n";
                         size_t len = 1;
 
-                        base64_enc(&state->pem_b64, &buf, &len, dstp, &dstlen);
+                        base64_enc(&state->pem_b64, dstp, &dstlen, &buf, &len);
                 }
         }
 
@@ -165,8 +165,8 @@ pem_is_finished(const struct pem_state *state)
 }
 
 void
-pem_enc(struct pem_state *state, const void **srcp, size_t *srclenp,
-    void **dstp, size_t *dstlenp)
+pem_enc(struct pem_state *state, void **dstp, size_t *dstlenp,
+    const void **srcp, size_t *srclenp)
 {
         switch (state->pem_state) {
         case PEM_STATE_BEGIN:
@@ -177,7 +177,7 @@ pem_enc(struct pem_state *state, const void **srcp, size_t *srclenp,
 
                 /* FALLTHROUGH */
         case PEM_STATE_PAYLOAD:
-                pem_write_lines(state, srcp, srclenp, dstp, dstlenp);
+                pem_write_lines(state, dstp, dstlenp, srcp, srclenp);
                 break;
 
         default: break;

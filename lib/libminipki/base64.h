@@ -26,8 +26,8 @@
  * $FreeBSD$
  */
 
-#ifndef _LIBMINIPKI_BASE64_
-#define _LIBMINIPKI_BASE64_
+#ifndef _LIBMINIPKI_BASE64_H_
+#define _LIBMINIPKI_BASE64_H_
 
 #include <stdbool.h>
 #include <sys/types.h>
@@ -48,8 +48,8 @@ extern bool base64_is_finished(const struct base64_state *state);
  * dst.  The state argument is necessary to hold fragment data across
  * multiple calls to base64_enc and/or base64_finish
  */
-extern void base64_enc(struct base64_state *state, const void **srcp,
-    size_t *srclen, void **dstp, size_t *dstlen);
+extern void base64_enc(struct base64_state *state, void **dstp, size_t *dstlen,
+    const void **srcp, size_t *srclen);
 
 /* Finish writing out base64 data to the destination, including any
  * padding.  This should be called once all source data has been
