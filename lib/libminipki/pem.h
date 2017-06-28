@@ -26,8 +26,8 @@
  * $FreeBSD$
  */
 
-#ifndef _LIBMINIPKI_PEM_
-#define _LIBMINIPKI_PEM_
+#ifndef _LIBMINIPKI_PEM_H_
+#define _LIBMINIPKI_PEM_H_
 
 #include <sys/types.h>
 
@@ -54,8 +54,8 @@ extern void pem_start(struct pem_state *state);
 
 extern bool pem_is_finished(const struct pem_state *state);
 
-extern void pem_enc(struct pem_state *state, const void **srcp,
-    size_t *srclen, void **dstp, size_t *dstlen);
+extern void pem_enc(struct pem_state *state, void **dstp, size_t *dstlen,
+    const void **srcp, size_t *srclen);
 
 extern void pem_finish(struct pem_state *state, void **dstp, size_t *dstlen);
 
