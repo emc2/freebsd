@@ -44,11 +44,30 @@ enum sig_kind
         SIG_KIND_ED25519
 };
 
-struct dname_elem
+/* Distinguished names.  Since we are relying on the DER encoding and
+ * we don't care about the contents of distinguished names aside
+ * from equality checks, we can just treat them as bitstrings
+ */
+struct dname
 {
-        u_int dne_type_len;
-        u_char *dne_type;
-        char *dne_val;
+        u_int dn_len;
+        void *dn_data;
+};
+
+struct serial_num
+{
+        u_int sn_len;
+        void *sn_data;
+};
+
+struct signer
+{
+        enum digest_kind si_digest;
+        enum digest_kind si_alg;
+        struct dname si_dname;
+        struct serial_num si_serial;
+        u_int si_siglen;
+        void *si_sig;
 };
 
 #endif
