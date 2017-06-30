@@ -26,38 +26,21 @@
  * $FreeBSD$
  */
 
-#ifndef _LIBMINIPKI_CMS_H_
-#define _LIBMINIPKI_CMS_H_
-
-#include <sys/types.h>
+#ifndef _LIBMINIPKI_X509_H_
+#define _LIBMINIPKI_X509_H_
 
 #include "common.h"
 
-enum cms_msg_kind
+struct x509_cert
 {
-        CMS_MSG_SIGNED_DATA
-};
-
-#define cmsig_data cms_payload._cms_signed._cmsig_data
-#define cmsig_nsiginfos cms_payload._cms_signed._cmsig_nsiginfos
-#define cmsig_siginfos cms_payload._cms_signed._cmsig_siginfos
-
-struct cms_signed
-{
-        void *_cmsig_data;
-        u_int _cmsig_nsiginfos;
-        struct cms_signer *_cmsig_siginfos;
-};
-
-union cms_payload
-{
-        struct cms_signed _cms_signed;
-};
-
-struct cms_msg
-{
-        enum cms_msg_kind cms_kind;
-        union cms_payload _cms_payload;
+        struct dname x509_dname;
+        struct serial_num x509_serial;
+        struct signer x509_signer;
+        time_t x509_valid_begin;
+        time_t x509_valid_end;
+        enum digest_kind si_alg;
+        u_int x509_keylen;
+        void *x509_key;
 };
 
 #endif
