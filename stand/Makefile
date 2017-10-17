@@ -9,6 +9,7 @@ SUBDIR+=		ficl
 SUBDIR+=		forth
 .endif
 
+SUBDIR+=		boot_crypto
 SUBDIR+=		man
 
 .include <bsd.arch.inc.mk>
