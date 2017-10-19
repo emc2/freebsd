@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD$");
 #include <disk.h>
 
 static EFI_GUID blkio_guid = BLOCK_IO_PROTOCOL;
+static EFI_GUID FreeBSDGELIGUID = FREEBSD_GELI_GUID;
 
 static int efipart_initfd(void);
 static int efipart_initcd(void);
@@ -259,7 +260,7 @@ efipart_hdd(EFI_DEVICE_PATH *dp)
 		}
 
 		/*
-		 * We assume the block size 512 or greater power of 2. 
+		 * We assume the block size 512 or greater power of 2.
 		 * iPXE is known to insert stub BLOCK IO device with
 		 * BlockSize 1.
 		 */
@@ -451,16 +452,41 @@ efipart_initcd(void)
 	return (0);
 }
 
+static size_t
+wcslen(const CHAR16 *s)
+{
+        size_t len;
+
+        for(len = 0; s[len] != '\0'; len++);
+
+        return len;
+}
+
+static void
+efifs_dev_print(EFI_DEVICE_PATH *devpath)
+{
+        CHAR16 *name16;
+
+        name16 = efi_devpath_name(devpath);
+        char buf[wcslen(name16) + 1];
+        memset(buf, 0, sizeof buf);
+        cpy16to8(name16, buf, wcslen(name16));
+        printf("%s\n", buf);
+}
+
 static int
 efipart_hdinfo_add(EFI_HANDLE disk_handle, EFI_HANDLE part_handle)
 {
-	EFI_DEVICE_PATH *disk_devpath, *part_devpath;
+        EFI_DEVICE_PATH *disk_devpath, *part_devpath, *trimpath, *lastnode;
+        VENDOR_DEVICE_PATH *vendornode;
 	HARDDRIVE_DEVICE_PATH *node;
 	int unit;
-	pdinfo_t *hd, *pd, *last;
+	pdinfo_t *hd, *pd, *pp, *last;
 
 	disk_devpath = efi_lookup_devpath(disk_handle);
-	if (disk_devpath == NULL)
+	part_devpath = efi_lookup_devpath(part_handle);
+
+	if (disk_devpath == NULL || part_devpath == NULL) {
 		return (ENOENT);
 
 	if (part_handle != NULL) {
@@ -476,7 +502,45 @@ efipart_hdinfo_add(EFI_HANDLE disk_handle, EFI_HANDLE part_handle)
 		node = NULL;
 	}
 
+        /* Get the disk partition node */
+        lastnode = efi_devpath_last_node(part_devpath);
+	if (lastnode == NULL)
+		return (ENOENT);	/* This should not happen. */
+
+
+        if (DevicePathType(lastnode) == MEDIA_DEVICE_PATH) {
+                if (DevicePathSubType(lastnode) == MEDIA_VENDOR_DP) {
+                        vendornode = (VENDOR_DEVICE_PATH *)lastnode;
+
+                        /* We only want GELI partitions */
+                        if (memcmp(&(vendornode->Guid), &FreeBSDGELIGUID,
+                            sizeof(EFI_GUID))) {
+                                return (EINVAL);
+                        }
+
+                        /* Trim off the vendor node */
+                        trimpath = efi_devpath_trim(part_devpath);
+
+			if (trimpath == NULL)
+                                return (ENOENT);
+
+                        lastnode = efi_devpath_last_node(trimpath);
+
+                        if (lastnode == NULL)
+                                return (ENOENT);
+
+                        node = (HARDDRIVE_DEVICE_PATH *)lastnode;
+                } else if (DevicePathSubType(lastnode) == MEDIA_HARDDRIVE_DP) {
+                        node = (HARDDRIVE_DEVICE_PATH *)lastnode;
+                }
+                else
+                        return (EINVAL);
+        } else {
+                return (EINVAL);
+        }
+
 	pd = calloc(1, sizeof(pdinfo_t));
+
 	if (pd == NULL) {
 		printf("Failed to add disk, out of memory\n");
 		return (ENOMEM);
@@ -484,11 +548,53 @@ efipart_hdinfo_add(EFI_HANDLE disk_handle, EFI_HANDLE part_handle)
 	STAILQ_INIT(&pd->pd_part);
 
 	STAILQ_FOREACH(hd, &hdinfo, pd_link) {
-		if (efi_devpath_match(hd->pd_devpath, disk_devpath) == true) {
-			if (part_devpath == NULL)
-				return (0);
+		if (efi_devpath_match(hd->pd_devpath, disk_devpath) != 0) {
+                        /* Check if there's a related device entry
+                         * already here.
+                         */
+                        STAILQ_FOREACH(pp, &hd->pd_part, pd_link) {
+                                /* If the new device is a subpath of
+                                 * an existing device, then the
+                                 * existing entry subsumes the new
+                                 * one.
+                                 */
+                                trimpath = efi_devpath_trim(pp->pd_devpath);
 
-			/* Add the partition. */
+                                if (trimpath == NULL)
+                                        return (ENOMEM);
+
+                                if (efi_devpath_match(trimpath,
+                                    part_devpath) != 0) {
+                                        free(trimpath);
+                                        free(pd);
+                                        return (EBUSY);
+                                }
+
+                                /* If the existing device path is a
+                                 * subpath of the new one, then the
+                                 * new entry subsumes the existing
+                                 * one.
+                                 */
+                                free(trimpath);
+
+                                trimpath = efi_devpath_trim(part_devpath);
+
+                                if (trimpath == NULL)
+                                        return (ENOMEM);
+
+                                if (efi_devpath_match(trimpath,
+                                    pp->pd_devpath) != 0) {
+                                        pp->pd_handle = part_handle;
+                                        pp->pd_devpath = part_devpath;
+                                        free(trimpath);
+                                        free(pd);
+                                        return (0);
+                                }
+                                free(trimpath);
+
+                        }
+
+                        /* Add the partition. */
 			pd->pd_handle = part_handle;
 			pd->pd_unit = node->PartitionNumber;
 			pd->pd_devpath = part_devpath;
@@ -632,7 +738,6 @@ efipart_updatehd(void)
 		devpath = efi_lookup_devpath(efipart_handles[i]);
 		if (devpath == NULL)
 			continue;
-
 		if ((node = efi_devpath_last_node(devpath)) == NULL)
 			continue;
 
@@ -643,6 +748,29 @@ efipart_updatehd(void)
 		    &blkio_guid, (void **)&blkio);
 		if (EFI_ERROR(status))
 			continue;
+
+                /* Handle GELI volumes */
+                if (DevicePathType(node) == MEDIA_DEVICE_PATH &&
+                    DevicePathSubType(node) == MEDIA_VENDOR_DP) {
+                        VENDOR_DEVICE_PATH *vendornode;
+
+                        vendornode = (VENDOR_DEVICE_PATH *)node;
+
+                        /* We only want GELI partitions */
+                        if (memcmp(&(vendornode->Guid), &FreeBSDGELIGUID,
+                            sizeof(EFI_GUID))) {
+                                continue;
+                        }
+
+                        /* Trim off the vendor node */
+                        devpathcpy = efi_devpath_trim(devpath);
+			if (devpathcpy == NULL)
+				continue;
+                        if ((node = efi_devpath_last_node(devpathcpy)) == NULL)
+                                continue;
+
+                        devpath = devpathcpy;
+                }
 
 		if (DevicePathType(node) == MEDIA_DEVICE_PATH &&
 		    DevicePathSubType(node) == MEDIA_FILEPATH_DP) {
@@ -655,16 +783,19 @@ efipart_updatehd(void)
 			devpathcpy = efi_devpath_trim(devpath);
 			if (devpathcpy == NULL)
 				continue;
+
 			tmpdevpath = devpathcpy;
 			status = BS->LocateDevicePath(&blkio_guid, &tmpdevpath,
 			    &handle);
 			free(devpathcpy);
 			if (EFI_ERROR(status))
 				continue;
+
 			/*
 			 * We do not support nested partitions.
 			 */
 			devpathcpy = efi_lookup_devpath(handle);
+
 			if (devpathcpy == NULL)
 				continue;
 			if ((node = efi_devpath_last_node(devpathcpy)) == NULL)
@@ -757,18 +888,6 @@ efipart_print_common(struct devsw *dev, pdinfo_list_t *pdlist, int verbose)
 			pd_dev.d_slice = -1;
 			pd_dev.d_partition = -1;
 			pd_dev.d_opendata = blkio;
-			ret = disk_open(&pd_dev, blkio->Media->BlockSize *
-			    (blkio->Media->LastBlock + 1),
-			    blkio->Media->BlockSize);
-			if (ret == 0) {
-				ret = disk_print(&pd_dev, line, verbose);
-				disk_close(&pd_dev);
-				if (ret != 0)
-					return (ret);
-			} else {
-				/* Do not fail from disk_open() */
-				ret = 0;
-			}
 		} else {
 			if ((ret = pager_output("\n")) != 0)
 				break;
@@ -796,6 +915,49 @@ efipart_printhd(int verbose)
 }
 
 static int
+efipart_lookupdev(struct disk_devdesc *dev, pdinfo_t **pp)
+{
+	pdinfo_list_t *pdi;
+	pdinfo_t *pd = NULL, *curr;
+
+	if (dev == NULL) {
+		return (EINVAL);
+        }
+
+	pdi = efiblk_get_pdinfo_list(dev->d_dev);
+	if (pdi == NULL) {
+		return (EINVAL);
+        }
+
+	STAILQ_FOREACH(curr, pdi, pd_link) {
+                if (curr->pd_unit == dev->d_unit) {
+                        pd = curr;
+                        break;
+                }
+	}
+
+        if (pd == NULL)
+                return (ENOENT);
+
+        *pp = NULL;
+
+        /* If we're looking up a specific partition, get the
+         * IO interface from that devide handle.
+         */
+	STAILQ_FOREACH(curr, &pd->pd_part, pd_link) {
+                if (curr->pd_unit == dev->d_slice) {
+                        *pp = curr;
+                        break;
+                }
+	}
+
+        if (*pp == NULL)
+                return (ENOENT);
+
+        return (0);
+}
+
+static int
 efipart_open(struct open_file *f, ...)
 {
 	va_list args;
@@ -803,48 +965,34 @@ efipart_open(struct open_file *f, ...)
 	pdinfo_t *pd;
 	EFI_BLOCK_IO *blkio;
 	EFI_STATUS status;
+        int err;
 
 	va_start(args, f);
 	dev = va_arg(args, struct disk_devdesc*);
 	va_end(args);
-	if (dev == NULL)
-		return (EINVAL);
 
-	pd = efiblk_get_pdinfo((struct devdesc *)dev);
-	if (pd == NULL)
-		return (EIO);
+        if ((err = efipart_lookupdev(dev, &pd)) != 0) {
+                return (err);
+        }
 
 	if (pd->pd_blkio == NULL) {
-		status = BS->HandleProtocol(pd->pd_handle, &blkio_guid,
-		    (void **)&pd->pd_blkio);
-		if (EFI_ERROR(status))
-			return (efi_status_to_errno(status));
+                status = BS->HandleProtocol(pd->pd_handle, &blkio_guid,
+                    (void **)&pd->pd_blkio);
+                if (EFI_ERROR(status))
+                        return (efi_status_to_errno(status));
 	}
 
 	blkio = pd->pd_blkio;
-	if (!blkio->Media->MediaPresent)
+	if (!blkio->Media->MediaPresent) {
 		return (EAGAIN);
+        }
 
 	pd->pd_open++;
 	if (pd->pd_bcache == NULL)
 		pd->pd_bcache = bcache_allocate();
 
-	if (dev->d_dev->dv_type == DEVT_DISK) {
-		int rc;
+        dev->d_offset = 0;
 
-		rc = disk_open(dev,
-		    blkio->Media->BlockSize * (blkio->Media->LastBlock + 1),
-		    blkio->Media->BlockSize);
-		if (rc != 0) {
-			pd->pd_open--;
-			if (pd->pd_open == 0) {
-				pd->pd_blkio = NULL;
-				bcache_free(pd->pd_bcache);
-				pd->pd_bcache = NULL;
-			}
-		}
-		return (rc);
-	}
 	return (0);
 }
 
@@ -853,14 +1001,13 @@ efipart_close(struct open_file *f)
 {
 	struct disk_devdesc *dev;
 	pdinfo_t *pd;
+        int err;
 
 	dev = (struct disk_devdesc *)(f->f_devdata);
-	if (dev == NULL)
-		return (EINVAL);
 
-	pd = efiblk_get_pdinfo((struct devdesc *)dev);
-	if (pd == NULL)
-		return (EINVAL);
+        if ((err = efipart_lookupdev(dev, &pd)) != 0) {
+                return (err);
+        }
 
 	pd->pd_open--;
 	if (pd->pd_open == 0) {
@@ -868,8 +1015,7 @@ efipart_close(struct open_file *f)
 		bcache_free(pd->pd_bcache);
 		pd->pd_bcache = NULL;
 	}
-	if (dev->d_dev->dv_type == DEVT_DISK)
-		return (disk_close(dev));
+
 	return (0);
 }
 
@@ -878,21 +1024,13 @@ efipart_ioctl(struct open_file *f, u_long cmd, void *data)
 {
 	struct disk_devdesc *dev;
 	pdinfo_t *pd;
-	int rc;
+        int err;
 
 	dev = (struct disk_devdesc *)(f->f_devdata);
-	if (dev == NULL)
-		return (EINVAL);
 
-	pd = efiblk_get_pdinfo((struct devdesc *)dev);
-	if (pd == NULL)
-		return (EINVAL);
-
-	if (dev->d_dev->dv_type == DEVT_DISK) {
-		rc = disk_ioctl(dev, cmd, data);
-		if (rc != ENOTTY)
-			return (rc);
-	}
+        if ((err = efipart_lookupdev(dev, &pd)) != 0) {
+                return (err);
+        }
 
 	switch (cmd) {
 	case DIOCGSECTORSIZE:
@@ -958,14 +1096,13 @@ efipart_strategy(void *devdata, int rw, daddr_t blk, size_t size,
 	struct bcache_devdata bcd;
 	struct disk_devdesc *dev;
 	pdinfo_t *pd;
+        int err;
 
 	dev = (struct disk_devdesc *)devdata;
-	if (dev == NULL)
-		return (EINVAL);
 
-	pd = efiblk_get_pdinfo((struct devdesc *)dev);
-	if (pd == NULL)
-		return (EINVAL);
+        if ((err = efipart_lookupdev(dev, &pd)) != 0) {
+                return (err);
+        }
 
 	if (pd->pd_blkio->Media->RemovableMedia &&
 	    !pd->pd_blkio->Media->MediaPresent)
@@ -999,12 +1136,12 @@ efipart_realstrategy(void *devdata, int rw, daddr_t blk, size_t size,
 	int error;
 	size_t diskend, readstart;
 
-	if (dev == NULL || blk < 0)
+	if (blk < 0)
 		return (EINVAL);
 
-	pd = efiblk_get_pdinfo((struct devdesc *)dev);
-	if (pd == NULL)
-		return (EINVAL);
+        if ((error = efipart_lookupdev(dev, &pd)) != 0) {
+                return (error);
+        }
 
 	blkio = pd->pd_blkio;
 	if (blkio == NULL)
@@ -1014,20 +1151,7 @@ efipart_realstrategy(void *devdata, int rw, daddr_t blk, size_t size,
 		return (EIO);
 
 	off = blk * 512;
-	/*
-	 * Get disk blocks, this value is either for whole disk or for
-	 * partition.
-	 */
-	disk_blocks = 0;
-	if (dev->d_dev->dv_type == DEVT_DISK) {
-		if (disk_ioctl(dev, DIOCGMEDIASIZE, &disk_blocks) == 0) {
-			/* DIOCGMEDIASIZE does return bytes. */
-			disk_blocks /= blkio->Media->BlockSize;
-		}
-		d_offset = dev->d_offset;
-	}
-	if (disk_blocks == 0)
-		disk_blocks = blkio->Media->LastBlock + 1 - d_offset;
+        disk_blocks = blkio->Media->LastBlock + 1 - d_offset;
 
 	/* make sure we don't read past disk end */
 	if ((off + size) / blkio->Media->BlockSize > d_offset + disk_blocks) {
