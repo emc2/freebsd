@@ -73,6 +73,8 @@ EFI_GUID fdtdtb = FDT_TABLE_GUID;
 EFI_GUID inputid = SIMPLE_TEXT_INPUT_PROTOCOL;
 
 static EFI_LOADED_IMAGE *img;
+static EFI_DEVICE_PATH *imgpath;
+static EFI_DEVICE_PATH *imgprefix;
 
 #ifdef	EFI_ZFS_BOOT
 bool
@@ -164,25 +166,229 @@ out:
 	return retval;
 }
 
-static void
-set_devdesc_currdev(struct devsw *dev, int unit)
+/* Check if this is a preferred device */
+static bool
+check_preferred(EFI_HANDLE *h)
 {
-	struct devdesc currdev;
-	char *devname;
+        EFI_DEVICE_PATH *path = efi_lookup_devpath(h);
+        bool out;
 
-	currdev.d_dev = dev;
-	currdev.d_type = currdev.d_dev->dv_type;
-	currdev.d_unit = unit;
-	currdev.d_opendata = NULL;
-	devname = efi_fmtdev(&currdev);
+        if ((path = efi_lookup_devpath(h)) == NULL)
+                return (false);
 
+        out = efi_devpath_is_prefix(imgpath, path) ||
+            efi_devpath_is_prefix(imgprefix, path);
+
+        return (out);
+}
+
+static void
+set_vars(struct devdesc* currdev)
+{
+        char *devname;
+
+	devname = efi_fmtdev(currdev);
 	env_setenv("currdev", EV_VOLATILE, devname, efi_setcurrdev,
 	    env_nounset);
 	env_setenv("loaddev", EV_VOLATILE, devname, env_noset, env_nounset);
 }
 
+static void
+set_devdesc_currdev(struct devsw *dev, int unit)
+{
+	struct devdesc currdev;
+
+	currdev.d_dev = dev;
+	currdev.d_type = currdev.d_dev->dv_type;
+	currdev.d_unit = unit;
+	currdev.d_opendata = NULL;
+        set_vars(&currdev);
+}
+
+/* Directly check a devdesc for an installed system */
 static int
-find_currdev(EFI_LOADED_IMAGE *img)
+check_devdesc(struct devdesc *currdev) {
+        /* Files that indicate the presence of an installed system */
+        static const char* paths[] = {
+                "/boot/loader.conf",
+                "/boot/kernel",
+                NULL
+        };
+
+        struct stat sb;
+        int i, err;
+
+        /* Check for the presence of any of the files */
+        for (i = 0; paths[i] != NULL; i++) {
+                if ((err = stat(paths[i], &sb)) != ENOENT)
+                        return (err);
+        }
+
+        return (ENOENT);
+}
+
+/* Set up a dev and then check it for an installed system */
+static int
+check_dev(struct devsw *dev, int unit) {
+	struct devdesc currdev;
+
+	currdev.d_dev = dev;
+	currdev.d_type = currdev.d_dev->dv_type;
+	currdev.d_unit = unit;
+	currdev.d_opendata = NULL;
+        set_vars(&currdev);
+
+        return (check_devdesc(&currdev));
+}
+
+static int
+find_currdev_preferred(void)
+{
+        pdinfo_list_t *pdi_list;
+        pdinfo_t *dp, *pp;
+        char *devname;
+
+#ifdef EFI_ZFS_BOOT
+        /* Did efi_zfs_probe() detect the boot pool? */
+        if (pool_guid != 0) {
+                struct zfs_devdesc currdev;
+
+                currdev.d_dev = &zfs_dev;
+                currdev.d_unit = 0;
+                currdev.d_type = currdev.d_dev->dv_type;
+                currdev.d_opendata = NULL;
+                currdev.pool_guid = pool_guid;
+                currdev.root_guid = 0;
+                devname = efi_fmtdev(&currdev);
+                set_vars((struct devdesc*)(&currdev));
+                init_zfs_bootenv(devname);
+
+                if (check_devdesc((struct devdesc*)(&currdev)) == 0)
+                        return (0);
+        }
+#endif  /* EFI_ZFS_BOOT */
+        /* We have device lists for hd, cd, fd, walk them all. */
+        pdi_list = efiblk_get_pdinfo_list(&efipart_hddev);
+        STAILQ_FOREACH(dp, pdi_list, pd_link) {
+                struct disk_devdesc currdev;
+
+                currdev.d_dev = &efipart_hddev;
+                currdev.d_type = currdev.d_dev->dv_type;
+                currdev.d_unit = dp->pd_unit;
+                currdev.d_opendata = NULL;
+                currdev.d_slice = -1;
+                currdev.d_partition = -1;
+                set_vars((struct devdesc*)(&currdev));
+
+                if (check_preferred(dp->pd_handle) &&
+                    check_devdesc((struct devdesc*)(&currdev)) == 0)
+                        return (0);
+
+                 /* Assuming GPT partitioning. */
+                STAILQ_FOREACH(pp, &dp->pd_part, pd_link) {
+                        if (check_preferred(pp->pd_handle)) {
+                                currdev.d_slice = pp->pd_unit;
+                                currdev.d_partition = 255;
+                                set_vars((struct devdesc*)(&currdev));
+
+                                if (check_devdesc((struct devdesc*)
+                                        (&currdev)) == 0)
+                                        return (0);
+                        }
+                }
+        }
+
+        pdi_list = efiblk_get_pdinfo_list(&efipart_cddev);
+        STAILQ_FOREACH(dp, pdi_list, pd_link) {
+                if (check_preferred(dp->pd_handle) &&
+                    check_dev(&efipart_cddev, dp->pd_unit) == 0)
+                        return (0);
+        }
+
+        pdi_list = efiblk_get_pdinfo_list(&efipart_fddev);
+        STAILQ_FOREACH(dp, pdi_list, pd_link) {
+                if (check_preferred(dp->pd_handle) &&
+                    check_dev(&efipart_fddev, dp->pd_unit) == 0)
+                        return (0);
+        }
+
+        return (ENOENT);
+}
+
+static int
+find_currdev_all(void)
+{
+        pdinfo_list_t *pdi_list;
+        pdinfo_t *dp, *pp;
+        zfsinfo_list_t *zfsi_list;
+        zfsinfo_t *zi;
+        char *devname;
+
+#ifdef EFI_ZFS_BOOT
+        zfsi_list = efizfs_get_zfsinfo_list();
+        STAILQ_FOREACH(zi, zfsi_list, zi_link) {
+                struct zfs_devdesc currdev;
+
+                currdev.d_dev = &zfs_dev;
+                currdev.d_unit = 0;
+                currdev.d_type = currdev.d_dev->dv_type;
+                currdev.d_opendata = NULL;
+                currdev.pool_guid = zi->zi_pool_guid;
+                currdev.root_guid = 0;
+                devname = efi_fmtdev(&currdev);
+                set_vars((struct devdesc*)(&currdev));
+                init_zfs_bootenv(devname);
+
+                if (check_devdesc((struct devdesc*)(&currdev)) == 0)
+                        return (0);
+        }
+#endif /* EFI_ZFS_BOOT */
+
+        /* We have device lists for hd, cd, fd, walk them all. */
+        pdi_list = efiblk_get_pdinfo_list(&efipart_hddev);
+        STAILQ_FOREACH(dp, pdi_list, pd_link) {
+                struct disk_devdesc currdev;
+
+                currdev.d_dev = &efipart_hddev;
+                currdev.d_type = currdev.d_dev->dv_type;
+                currdev.d_unit = dp->pd_unit;
+                currdev.d_opendata = NULL;
+                currdev.d_slice = -1;
+                currdev.d_partition = -1;
+                set_vars((struct devdesc*)(&currdev));
+
+                if (check_devdesc((struct devdesc*)(&currdev)) == 0)
+                        return (0);
+
+                /* Assuming GPT partitioning. */
+                STAILQ_FOREACH(pp, &dp->pd_part, pd_link) {
+                        currdev.d_slice = pp->pd_unit;
+                        currdev.d_partition = 255;
+                        set_vars((struct devdesc*)(&currdev));
+
+                        if (check_devdesc((struct devdesc*)(&currdev)) == 0)
+                                return (0);
+                }
+        }
+
+        pdi_list = efiblk_get_pdinfo_list(&efipart_cddev);
+        STAILQ_FOREACH(dp, pdi_list, pd_link) {
+                if (check_dev(&efipart_cddev, dp->pd_unit) == 0)
+                        return (0);
+        }
+
+        pdi_list = efiblk_get_pdinfo_list(&efipart_fddev);
+        STAILQ_FOREACH(dp, pdi_list, pd_link) {
+                if (check_dev(&efipart_fddev, dp->pd_unit) == 0)
+                        return (0);
+        }
+
+        return (ENOENT);
+}
+
+/* Legacy-mode device search: assume we've been loaded by boot1 */
+static int
+find_currdev_legacy(void)
 {
 	pdinfo_list_t *pdi_list;
 	pdinfo_t *dp, *pp;
@@ -205,11 +411,7 @@ find_currdev(EFI_LOADED_IMAGE *img)
 		currdev.pool_guid = pool_guid;
 		currdev.root_guid = 0;
 		devname = efi_fmtdev(&currdev);
-
-		env_setenv("currdev", EV_VOLATILE, devname, efi_setcurrdev,
-		    env_nounset);
-		env_setenv("loaddev", EV_VOLATILE, devname, env_noset,
-		    env_nounset);
+                set_vars((struct devdesc*)(&currdev));
 		init_zfs_bootenv(devname);
 		return (0);
 	}
@@ -228,12 +430,8 @@ find_currdev(EFI_LOADED_IMAGE *img)
 		currdev.d_partition = -1;
 
 		if (dp->pd_handle == img->DeviceHandle) {
-			devname = efi_fmtdev(&currdev);
+                        set_vars((struct devdesc*)(&currdev));
 
-			env_setenv("currdev", EV_VOLATILE, devname,
-			    efi_setcurrdev, env_nounset);
-			env_setenv("loaddev", EV_VOLATILE, devname,
-			    env_noset, env_nounset);
 			return (0);
 		}
 		/* Assuming GPT partitioning. */
@@ -241,12 +439,8 @@ find_currdev(EFI_LOADED_IMAGE *img)
 			if (pp->pd_handle == img->DeviceHandle) {
 				currdev.d_slice = pp->pd_unit;
 				currdev.d_partition = 255;
-				devname = efi_fmtdev(&currdev);
+                                set_vars((struct devdesc*)(&currdev));
 
-				env_setenv("currdev", EV_VOLATILE, devname,
-				    efi_setcurrdev, env_nounset);
-				env_setenv("loaddev", EV_VOLATILE, devname,
-				    env_noset, env_nounset);
 				return (0);
 			}
 		}
@@ -306,11 +500,28 @@ find_currdev(EFI_LOADED_IMAGE *img)
 	return (ENOENT);
 }
 
+static int
+find_currdev(void)
+{
+        int err;
+
+        if ((err = find_currdev_legacy()) != ENOENT) {
+                return (err);
+        }
+
+        if ((err = find_currdev_preferred()) != ENOENT) {
+                return (err);
+        }
+
+        return find_currdev_all();
+}
+
 EFI_STATUS
 main(int argc, CHAR16 *argv[])
 {
 	char var[128];
 	EFI_GUID *guid;
+        EFI_STATUS status;
 	int i, j, vargood, howto;
 	UINTN k;
 	int has_kbd;
@@ -349,10 +560,27 @@ main(int argc, CHAR16 *argv[])
 	 */
 	bcache_init(32768, 512);
 
+        printf("Initializing Loader\n");
+
+        if ((status = BS->HandleProtocol(img->DeviceHandle, &devid,
+                (VOID**)&imgpath)) !=
+            EFI_SUCCESS) {
+                panic("Failed to query LoadedImage (%lu)\n",
+                    EFI_ERROR_CODE(status));
+        }
+
+        /* The loaded image device path ends with a partition, then a
+         * file path.  Trim them both to get the actual disk.
+         */
+        if ((imgprefix = efi_devpath_trim(imgpath)) == NULL ||
+            (imgprefix = efi_devpath_trim(imgprefix)) == NULL) {
+                panic("Couldn't trim device path");
+        }
+
 	/*
-	 * Parse the args to set the console settings, etc
-	 * boot1.efi passes these in, if it can read /boot.config or /boot/config
-	 * or iPXE may be setup to pass these in.
+	 * Parse the args to set the console settings, etc boot1.efi
+	 * passes these in, if it can read /boot.config or
+	 * /boot/config or iPXE may be setup to pass these in.
 	 *
 	 * Loop through the args, and for each one that contains an '=' that is
 	 * not the first character, add it to the environment.  This allows
@@ -482,7 +710,7 @@ main(int argc, CHAR16 *argv[])
 	 */
 	BS->SetWatchdogTimer(0, 0, 0, NULL);
 
-	if (find_currdev(img) != 0)
+	if (find_currdev() != 0)
 		return (EFI_NOT_FOUND);
 
 	efi_init_environment();
