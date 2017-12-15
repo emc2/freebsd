@@ -89,6 +89,16 @@ efi_free_devpath_name(CHAR16 *text)
 	BS->FreePool(text);
 }
 
+void
+efi_print_devpath(EFI_DEVICE_PATH *devpath)
+{
+        CHAR16 *str;
+
+        str = efi_devpath_name(devpath);
+        printf("%S\n", str);
+        efi_free_devpath_name(str);
+}
+
 EFI_DEVICE_PATH *
 efi_devpath_last_node(EFI_DEVICE_PATH *devpath)
 {

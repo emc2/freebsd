@@ -218,13 +218,15 @@ check_devdesc(struct devdesc *currdev) {
         struct stat sb;
         int i, err;
 
-        /* Check for the presence of any of the files */
+         /* Check for the presence of any of the files */
         for (i = 0; paths[i] != NULL; i++) {
-                if ((err = stat(paths[i], &sb)) != ENOENT)
+                err = stat(paths[i], &sb);
+                if (errno != ENOENT) {
                         return (err);
+                }
         }
 
-        return (ENOENT);
+        return (err);
 }
 
 /* Set up a dev and then check it for an installed system */
@@ -505,15 +507,16 @@ find_currdev(void)
 {
         int err;
 
-        if ((err = find_currdev_legacy()) != ENOENT) {
-                return (err);
-        }
-
         if ((err = find_currdev_preferred()) != ENOENT) {
                 return (err);
         }
 
-        return find_currdev_all();
+        if ((err = find_currdev_all()) != ENOENT) {
+                return (err);
+        }
+
+        return find_currdev_legacy();
+
 }
 
 EFI_STATUS
@@ -572,8 +575,7 @@ main(int argc, CHAR16 *argv[])
         /* The loaded image device path ends with a partition, then a
          * file path.  Trim them both to get the actual disk.
          */
-        if ((imgprefix = efi_devpath_trim(imgpath)) == NULL ||
-            (imgprefix = efi_devpath_trim(imgprefix)) == NULL) {
+        if ((imgprefix = efi_devpath_trim(imgpath)) == NULL) {
                 panic("Couldn't trim device path");
         }
 
