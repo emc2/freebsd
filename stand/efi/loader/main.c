@@ -167,6 +167,7 @@ out:
 }
 
 /* Check if this is a preferred device */
+#ifndef LOADER_CHECK_ALL_DEVS
 static bool
 check_preferred(EFI_HANDLE *h)
 {
@@ -182,8 +183,27 @@ check_preferred(EFI_HANDLE *h)
         return (out);
 }
 
+static bool
+zfs_check_preferred(uint64_t check_guid)
+{
+        return (pool_guid != 0 && check_guid == pool_guid);
+}
+#else
+static bool
+check_preferred(EFI_HANDLE *h)
+{
+        return (true);
+}
+
+static bool
+zfs_check_preferred(uint64_t check_guid)
+{
+        return (true);
+}
+#endif
+
 static void
-set_vars(struct devdesc* currdev)
+set_vars(struct devdesc *currdev)
 {
         char *devname;
 
@@ -244,29 +264,33 @@ check_dev(struct devsw *dev, int unit) {
 }
 
 static int
-find_currdev_preferred(void)
+find_currdev(void)
 {
         pdinfo_list_t *pdi_list;
         pdinfo_t *dp, *pp;
+        zfsinfo_list_t *zfsi_list;
+        zfsinfo_t *zi;
         char *devname;
 
 #ifdef EFI_ZFS_BOOT
-        /* Did efi_zfs_probe() detect the boot pool? */
-        if (pool_guid != 0) {
-                struct zfs_devdesc currdev;
+        zfsi_list = efizfs_get_zfsinfo_list();
+        STAILQ_FOREACH(zi, zfsi_list, zi_link) {
+                if (zfs_check_preferred(zi->zi_pool_guid)) {
+                        struct zfs_devdesc currdev;
 
-                currdev.d_dev = &zfs_dev;
-                currdev.d_unit = 0;
-                currdev.d_type = currdev.d_dev->dv_type;
-                currdev.d_opendata = NULL;
-                currdev.pool_guid = pool_guid;
-                currdev.root_guid = 0;
-                devname = efi_fmtdev(&currdev);
-                set_vars((struct devdesc*)(&currdev));
-                init_zfs_bootenv(devname);
+                        currdev.d_dev = &zfs_dev;
+                        currdev.d_unit = 0;
+                        currdev.d_type = currdev.d_dev->dv_type;
+                        currdev.d_opendata = NULL;
+                        currdev.pool_guid = zi->zi_pool_guid;
+                        currdev.root_guid = 0;
+                        devname = efi_fmtdev(&currdev);
+                        set_vars((struct devdesc*)(&currdev));
+                        init_zfs_bootenv(devname);
 
-                if (check_devdesc((struct devdesc*)(&currdev)) == 0)
-                        return (0);
+                        if (check_devdesc((struct devdesc*)(&currdev)) == 0)
+                                return (0);
+                }
         }
 #endif  /* EFI_ZFS_BOOT */
         /* We have device lists for hd, cd, fd, walk them all. */
@@ -300,6 +324,7 @@ find_currdev_preferred(void)
                 }
         }
 
+#ifdef LOADER_CHECK_ALL_DEVS
         pdi_list = efiblk_get_pdinfo_list(&efipart_cddev);
         STAILQ_FOREACH(dp, pdi_list, pd_link) {
                 if (check_preferred(dp->pd_handle) &&
@@ -313,210 +338,8 @@ find_currdev_preferred(void)
                     check_dev(&efipart_fddev, dp->pd_unit) == 0)
                         return (0);
         }
-
+#endif
         return (ENOENT);
-}
-
-static int
-find_currdev_all(void)
-{
-        pdinfo_list_t *pdi_list;
-        pdinfo_t *dp, *pp;
-        zfsinfo_list_t *zfsi_list;
-        zfsinfo_t *zi;
-        char *devname;
-
-#ifdef EFI_ZFS_BOOT
-        zfsi_list = efizfs_get_zfsinfo_list();
-        STAILQ_FOREACH(zi, zfsi_list, zi_link) {
-                struct zfs_devdesc currdev;
-
-                currdev.d_dev = &zfs_dev;
-                currdev.d_unit = 0;
-                currdev.d_type = currdev.d_dev->dv_type;
-                currdev.d_opendata = NULL;
-                currdev.pool_guid = zi->zi_pool_guid;
-                currdev.root_guid = 0;
-                devname = efi_fmtdev(&currdev);
-                set_vars((struct devdesc*)(&currdev));
-                init_zfs_bootenv(devname);
-
-                if (check_devdesc((struct devdesc*)(&currdev)) == 0)
-                        return (0);
-        }
-#endif /* EFI_ZFS_BOOT */
-
-        /* We have device lists for hd, cd, fd, walk them all. */
-        pdi_list = efiblk_get_pdinfo_list(&efipart_hddev);
-        STAILQ_FOREACH(dp, pdi_list, pd_link) {
-                struct disk_devdesc currdev;
-
-                currdev.d_dev = &efipart_hddev;
-                currdev.d_type = currdev.d_dev->dv_type;
-                currdev.d_unit = dp->pd_unit;
-                currdev.d_opendata = NULL;
-                currdev.d_slice = -1;
-                currdev.d_partition = -1;
-                set_vars((struct devdesc*)(&currdev));
-
-                if (check_devdesc((struct devdesc*)(&currdev)) == 0)
-                        return (0);
-
-                /* Assuming GPT partitioning. */
-                STAILQ_FOREACH(pp, &dp->pd_part, pd_link) {
-                        currdev.d_slice = pp->pd_unit;
-                        currdev.d_partition = 255;
-                        set_vars((struct devdesc*)(&currdev));
-
-                        if (check_devdesc((struct devdesc*)(&currdev)) == 0)
-                                return (0);
-                }
-        }
-
-        pdi_list = efiblk_get_pdinfo_list(&efipart_cddev);
-        STAILQ_FOREACH(dp, pdi_list, pd_link) {
-                if (check_dev(&efipart_cddev, dp->pd_unit) == 0)
-                        return (0);
-        }
-
-        pdi_list = efiblk_get_pdinfo_list(&efipart_fddev);
-        STAILQ_FOREACH(dp, pdi_list, pd_link) {
-                if (check_dev(&efipart_fddev, dp->pd_unit) == 0)
-                        return (0);
-        }
-
-        return (ENOENT);
-}
-
-/* Legacy-mode device search: assume we've been loaded by boot1 */
-static int
-find_currdev_legacy(void)
-{
-	pdinfo_list_t *pdi_list;
-	pdinfo_t *dp, *pp;
-	EFI_DEVICE_PATH *devpath, *copy;
-	EFI_HANDLE h;
-	char *devname;
-	struct devsw *dev;
-	int unit;
-	uint64_t extra;
-
-#ifdef EFI_ZFS_BOOT
-	/* Did efi_zfs_probe() detect the boot pool? */
-	if (pool_guid != 0) {
-		struct zfs_devdesc currdev;
-
-		currdev.d_dev = &zfs_dev;
-		currdev.d_unit = 0;
-		currdev.d_type = currdev.d_dev->dv_type;
-		currdev.d_opendata = NULL;
-		currdev.pool_guid = pool_guid;
-		currdev.root_guid = 0;
-		devname = efi_fmtdev(&currdev);
-                set_vars((struct devdesc*)(&currdev));
-		init_zfs_bootenv(devname);
-		return (0);
-	}
-#endif /* EFI_ZFS_BOOT */
-
-	/* We have device lists for hd, cd, fd, walk them all. */
-	pdi_list = efiblk_get_pdinfo_list(&efipart_hddev);
-	STAILQ_FOREACH(dp, pdi_list, pd_link) {
-		struct disk_devdesc currdev;
-
-		currdev.d_dev = &efipart_hddev;
-		currdev.d_type = currdev.d_dev->dv_type;
-		currdev.d_unit = dp->pd_unit;
-		currdev.d_opendata = NULL;
-		currdev.d_slice = -1;
-		currdev.d_partition = -1;
-
-		if (dp->pd_handle == img->DeviceHandle) {
-                        set_vars((struct devdesc*)(&currdev));
-
-			return (0);
-		}
-		/* Assuming GPT partitioning. */
-		STAILQ_FOREACH(pp, &dp->pd_part, pd_link) {
-			if (pp->pd_handle == img->DeviceHandle) {
-				currdev.d_slice = pp->pd_unit;
-				currdev.d_partition = 255;
-                                set_vars((struct devdesc*)(&currdev));
-
-				return (0);
-			}
-		}
-	}
-
-	pdi_list = efiblk_get_pdinfo_list(&efipart_cddev);
-	STAILQ_FOREACH(dp, pdi_list, pd_link) {
-		if (dp->pd_handle == img->DeviceHandle ||
-		    dp->pd_alias == img->DeviceHandle) {
-			set_devdesc_currdev(&efipart_cddev, dp->pd_unit);
-			return (0);
-		}
-	}
-
-	pdi_list = efiblk_get_pdinfo_list(&efipart_fddev);
-	STAILQ_FOREACH(dp, pdi_list, pd_link) {
-		if (dp->pd_handle == img->DeviceHandle) {
-			set_devdesc_currdev(&efipart_fddev, dp->pd_unit);
-			return (0);
-		}
-	}
-
-	/*
-	 * Try the device handle from our loaded image first.  If that
-	 * fails, use the device path from the loaded image and see if
-	 * any of the nodes in that path match one of the enumerated
-	 * handles.
-	 */
-	if (efi_handle_lookup(img->DeviceHandle, &dev, &unit, &extra) == 0) {
-		set_devdesc_currdev(dev, unit);
-		return (0);
-	}
-
-	copy = NULL;
-	devpath = efi_lookup_image_devpath(IH);
-	while (devpath != NULL) {
-		h = efi_devpath_handle(devpath);
-		if (h == NULL)
-			break;
-
-		free(copy);
-		copy = NULL;
-
-		if (efi_handle_lookup(h, &dev, &unit, &extra) == 0) {
-			set_devdesc_currdev(dev, unit);
-			return (0);
-		}
-
-		devpath = efi_lookup_devpath(h);
-		if (devpath != NULL) {
-			copy = efi_devpath_trim(devpath);
-			devpath = copy;
-		}
-	}
-	free(copy);
-
-	return (ENOENT);
-}
-
-static int
-find_currdev(void)
-{
-        int err;
-
-        if ((err = find_currdev_preferred()) != ENOENT) {
-                return (err);
-        }
-
-        if ((err = find_currdev_all()) != ENOENT) {
-                return (err);
-        }
-
-        return find_currdev_legacy();
-
 }
 
 EFI_STATUS
@@ -562,8 +385,6 @@ main(int argc, CHAR16 *argv[])
 	 * Initialise the block cache. Set the upper limit.
 	 */
 	bcache_init(32768, 512);
-
-        printf("Initializing Loader\n");
 
         if ((status = BS->HandleProtocol(img->DeviceHandle, &devid,
                 (VOID**)&imgpath)) !=
