@@ -30,6 +30,9 @@
 #ifndef _LOADER_EFILIB_H
 #define	_LOADER_EFILIB_H
 
+#define FREEBSD_GELI_GUID { 0x516e7cbc, 0x6ecf, 0x11d6, \
+    {0x8f, 0xf8, 0x00, 0x02, 0x2d, 0x09, 0x71, 0x2b } }
+
 #include <stand.h>
 #include <stdbool.h>
 #include <sys/queue.h>
@@ -52,6 +55,7 @@ typedef struct pdinfo
 {
 	STAILQ_ENTRY(pdinfo)	pd_link;	/* link in device list */
 	pdinfo_list_t		pd_part;	/* list of partitions */
+        EFI_HANDLE              pd_basehandle;
 	EFI_HANDLE		pd_handle;
 	EFI_HANDLE		pd_alias;
 	EFI_DEVICE_PATH		*pd_devpath;
