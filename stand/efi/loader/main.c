@@ -52,6 +52,7 @@ __FBSDID("$FreeBSD$");
 #include "efizfs.h"
 #endif
 
+#include "efi_drivers.h"
 #include "loader_efi.h"
 
 extern char bootprog_info[];
@@ -399,6 +400,11 @@ main(int argc, CHAR16 *argv[])
         if ((imgprefix = efi_devpath_trim(imgpath)) == NULL) {
                 panic("Couldn't trim device path");
         }
+
+	for (i = 0; efi_drivers[i] != NULL; i++) {
+                if (efi_drivers[i]->init != NULL)
+			efi_drivers[i]->init();
+	}
 
 	/*
 	 * Parse the args to set the console settings, etc boot1.efi
