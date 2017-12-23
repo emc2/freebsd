@@ -452,28 +452,6 @@ efipart_initcd(void)
 	return (0);
 }
 
-static size_t
-wcslen(const CHAR16 *s)
-{
-        size_t len;
-
-        for(len = 0; s[len] != '\0'; len++);
-
-        return len;
-}
-
-static void
-efifs_dev_print(EFI_DEVICE_PATH *devpath)
-{
-        CHAR16 *name16;
-
-        name16 = efi_devpath_name(devpath);
-        char buf[wcslen(name16) + 1];
-        memset(buf, 0, sizeof buf);
-        cpy16to8(name16, buf, wcslen(name16));
-        printf("%s\n", buf);
-}
-
 static int
 efipart_hdinfo_add(EFI_HANDLE disk_handle, EFI_HANDLE part_handle)
 {
@@ -486,7 +464,7 @@ efipart_hdinfo_add(EFI_HANDLE disk_handle, EFI_HANDLE part_handle)
 	disk_devpath = efi_lookup_devpath(disk_handle);
 	part_devpath = efi_lookup_devpath(part_handle);
 
-	if (disk_devpath == NULL || part_devpath == NULL) {
+	if (disk_devpath == NULL || part_devpath == NULL)
 		return (ENOENT);
 
 	if (part_handle != NULL) {
@@ -585,6 +563,7 @@ efipart_hdinfo_add(EFI_HANDLE disk_handle, EFI_HANDLE part_handle)
                                 if (efi_devpath_match(trimpath,
                                     pp->pd_devpath) != 0) {
                                         pp->pd_handle = part_handle;
+                                        pp->pd_basehandle = disk_handle;
                                         pp->pd_devpath = part_devpath;
                                         free(trimpath);
                                         free(pd);
@@ -596,6 +575,7 @@ efipart_hdinfo_add(EFI_HANDLE disk_handle, EFI_HANDLE part_handle)
 
                         /* Add the partition. */
 			pd->pd_handle = part_handle;
+                        pd->pd_basehandle = disk_handle;
 			pd->pd_unit = node->PartitionNumber;
 			pd->pd_devpath = part_devpath;
 			STAILQ_INSERT_TAIL(&hd->pd_part, pd, pd_link);
@@ -612,6 +592,7 @@ efipart_hdinfo_add(EFI_HANDLE disk_handle, EFI_HANDLE part_handle)
 	/* Add the disk. */
 	hd = pd;
 	hd->pd_handle = disk_handle;
+        hd->pd_basehandle = disk_handle;
 	hd->pd_unit = unit;
 	hd->pd_devpath = disk_devpath;
 	STAILQ_INSERT_TAIL(&hdinfo, hd, pd_link);
@@ -628,6 +609,7 @@ efipart_hdinfo_add(EFI_HANDLE disk_handle, EFI_HANDLE part_handle)
 
 	/* Add the partition. */
 	pd->pd_handle = part_handle;
+        pd->pd_basehandle = disk_handle;
 	pd->pd_unit = node->PartitionNumber;
 	pd->pd_devpath = part_devpath;
 	STAILQ_INSERT_TAIL(&hd->pd_part, pd, pd_link);
@@ -687,6 +669,7 @@ efipart_hdinfo_add_filepath(EFI_HANDLE disk_handle)
 	 */
 	if (p == NULL) {	/* no colon, add the disk */
 		pd->pd_handle = disk_handle;
+		pd->pd_basehandle = disk_handle;
 		pd->pd_unit = unit;
 		pd->pd_devpath = devpath;
 		STAILQ_INSERT_TAIL(&hdinfo, pd, pd_link);
@@ -716,7 +699,8 @@ efipart_hdinfo_add_filepath(EFI_HANDLE disk_handle)
 		return (EINVAL);
 	}
 	/* Add the partition. */
-	pd->pd_handle = disk_handle;
+        pd->pd_handle = disk_handle;
+	pd->pd_basehandle = disk_handle;
 	pd->pd_unit = unit;
 	pd->pd_devpath = devpath;
 	STAILQ_INSERT_TAIL(&last->pd_part, pd, pd_link);
@@ -835,7 +819,8 @@ efipart_print_common(struct devsw *dev, pdinfo_list_t *pdlist, int verbose)
 	int ret = 0;
 	EFI_BLOCK_IO *blkio;
 	EFI_STATUS status;
-	EFI_HANDLE h;
+	EFI_HANDLE handle;
+	EFI_HANDLE base_handle;
 	pdinfo_t *pd;
 	CHAR16 *text;
 	struct disk_devdesc pd_dev;
@@ -849,9 +834,10 @@ efipart_print_common(struct devsw *dev, pdinfo_list_t *pdlist, int verbose)
 		return (ret);
 
 	STAILQ_FOREACH(pd, pdlist, pd_link) {
-		h = pd->pd_handle;
+		handle = pd->pd_handle;
+                base_handle = pd->pd_basehandle;
 		if (verbose) {	/* Output the device path. */
-			text = efi_devpath_name(efi_lookup_devpath(h));
+			text = efi_devpath_name(efi_lookup_devpath(base_handle));
 			if (text != NULL) {
 				printf("  %S", text);
 				efi_free_devpath_name(text);
@@ -862,7 +848,8 @@ efipart_print_common(struct devsw *dev, pdinfo_list_t *pdlist, int verbose)
 		snprintf(line, sizeof(line),
 		    "    %s%d", dev->dv_name, pd->pd_unit);
 		printf("%s:", line);
-		status = BS->HandleProtocol(h, &blkio_guid, (void **)&blkio);
+		status = BS->HandleProtocol(base_handle, &blkio_guid,
+                    (void **)&blkio);
 		if (!EFI_ERROR(status)) {
 			printf("    %llu",
 			    blkio->Media->LastBlock == 0? 0:
@@ -888,7 +875,21 @@ efipart_print_common(struct devsw *dev, pdinfo_list_t *pdlist, int verbose)
 			pd_dev.d_slice = -1;
 			pd_dev.d_partition = -1;
 			pd_dev.d_opendata = blkio;
-		} else {
+
+                        ret = disk_open(&pd_dev, blkio->Media->BlockSize *
+                            (blkio->Media->LastBlock + 1),
+                            blkio->Media->BlockSize);
+                        if (ret == 0) {
+                                ret = disk_print(&pd_dev, line, verbose);
+                                disk_close(&pd_dev);
+                                if (ret != 0)
+                                        return (ret);
+                        } else {
+                                /* Do not fail from disk_open() */
+                          printf("Open device failed %d\n", ret);
+                                ret = 0;
+                        }
+                } else {
 			if ((ret = pager_output("\n")) != 0)
 				break;
 		}
@@ -944,12 +945,16 @@ efipart_lookupdev(struct disk_devdesc *dev, pdinfo_t **pp)
         /* If we're looking up a specific partition, get the
          * IO interface from that devide handle.
          */
-	STAILQ_FOREACH(curr, &pd->pd_part, pd_link) {
-                if (curr->pd_unit == dev->d_slice) {
-                        *pp = curr;
-                        break;
+        if (dev->d_slice != -1) {
+                STAILQ_FOREACH(curr, &pd->pd_part, pd_link) {
+                        if (curr->pd_unit == dev->d_slice) {
+                                *pp = curr;
+                                break;
+                        }
                 }
-	}
+        } else {
+                *pp = pd;
+        }
 
         if (*pp == NULL)
                 return (ENOENT);
