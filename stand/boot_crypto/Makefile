@@ -3,7 +3,7 @@
 
 MAN=
 
-.include <src.opts.mk>
+.include <bsd.init.mk>
 MK_SSP=		no
 
 LIB=		boot_crypto
@@ -14,20 +14,21 @@ NO_PIC=
 WARNS?=		0
 
 # sha256 and sha512 from sys/crypto
-.PATH: ${.CURDIR}/../../crypto/sha2
-CFLAGS+=	-DWEAK_REFS
-SRCS+=		sha256c.c sha512c.c
+.PATH: ${SYSDIR}/crypto/sha2
+CFLAGS+=        -DWEAK_REFS
+SRCS+=          sha256c.c sha512c.c
 
 # md5 from libmd
-.PATH: ${.CURDIR}/../../../lib/libmd
-SRCS+=		md5c.c
+.PATH: ${SRCTOP}/lib/libmd
+SRCS+=          md5c.c
 
 # AES implementation from sys/crypto
-.PATH: ${.CURDIR}/../../crypto/rijndael
-CFLAGS+=	-I${.CURDIR}/../../
+.PATH: ${SYSDIR}/crypto/rijndael
+CFLAGS+=        -I${LDRSRC}
 # Remove asserts
-CFLAGS+=	-DNDEBUG
-SRCS+=		rijndael-alg-fst.c rijndael-api-fst.c rijndael-api.c
+CFLAGS+=        -DNDEBUG
+SRCS+=          rijndael-alg-fst.c rijndael-api-fst.c rijndael-api.c
+
 SRCS+=		boot_crypto.c boot_crypto_aes.c
 
 .include <bsd.stand.mk>
