@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD$");
 
 const efi_driver_t *efi_drivers[] = {
         &key_inject_driver,
+        &geli_driver,
         NULL
 };
 

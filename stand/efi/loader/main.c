@@ -392,6 +392,11 @@ main(int argc, CHAR16 *argv[])
 	 */
 	bcache_init(32768, 512);
 
+	for (i = 0; efi_drivers[i] != NULL; i++) {
+                if (efi_drivers[i]->init != NULL)
+			efi_drivers[i]->init();
+	}
+
         if ((status = BS->HandleProtocol(img->DeviceHandle, &devid,
                 (VOID**)&imgpath)) !=
             EFI_SUCCESS) {

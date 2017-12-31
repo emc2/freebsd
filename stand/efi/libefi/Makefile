@@ -7,13 +7,18 @@ WARNS?=	2
 
 SRCS=	delay.c devpath.c efi_console.c efichar.c efinet.c efipart.c env.c errno.c \
         handles.c wchar.c libefi.c efi_driver_utils.c efizfs.c devicename.c \
-        key_inject.c
+        key_inject.c geli_driver.c
 
 .if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "i386"
 SRCS+=	time.c
 .elif ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "arm"
 SRCS+=	time_event.c
 .endif
+
+.PATH: ${SYSDIR}/geom/eli
+CFLAGS+= -D_STAND
+SRCS+=		g_eli_hmac.c g_eli_key.c g_eli_key_cache.c pkcs5v2.c
+
 
 # We implement a slightly non-standard %S in that it always takes a
 # CHAR16 that's common in UEFI-land instead of a wchar_t. This only
@@ -36,6 +41,9 @@ CFLAGS+= -I${EFIINCMD}
 CFLAGS+=	-I${ZFSSRC}
 CFLAGS+=	-DEFI_ZFS_BOOT
 .endif
+
+CFLAGS+= -I${SRCTOP}/stand/boot_crypto
+CFLAGS+= -I${SYSDIR}
 
 # Pick up the bootstrap header for some interface items
 CFLAGS+= -I${LDRSRC}

@@ -42,5 +42,6 @@ extern int efipart_getdesc(struct devdesc *dev, char **out);
 
 /* EFI drivers. */
 extern const efi_driver_t key_inject_driver;
+extern const efi_driver_t geli_driver;
 
 #endif

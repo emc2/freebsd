@@ -72,6 +72,8 @@ CFLAGS+= -DSMBIOS_NETWORK_ENDIAN_UUID
 LIBEFI_FDT=	${BOOTOBJ}/efi/fdt/libefi_fdt.a
 .endif
 
+LIBBOOT_CRYPTO= ${OBJTOP}/stand/boot_crypto/libboot_crypto.a
+
 # Include bcache code.
 HAVE_BCACHE=    yes
 
@@ -121,7 +123,8 @@ loader.efi: ${PROG}
 LIBEFI=		${BOOTOBJ}/efi/libefi/libefi.a
 
 DPADD=		${LDR_INTERP} ${LIBEFI} ${LIBFDT} ${LIBEFI_FDT} ${LIBZFSBOOT} ${LIBSA} \
-		${LDSCRIPT}
-LDADD=		${LDR_INTERP} ${LIBEFI} ${LIBFDT} ${LIBEFI_FDT} ${LIBZFSBOOT} ${LIBSA}
+		${LDSCRIPT} ${LIBBOOT_CRYPTO}
+LDADD=		${LDR_INTERP} ${LIBEFI} ${LIBFDT} ${LIBEFI_FDT} ${LIBZFSBOOT} ${LIBSA} \
+		${LIBBOOT_CRYPTO}
 
 .include <bsd.prog.mk>
