@@ -77,14 +77,6 @@ static EFI_LOADED_IMAGE *img;
 static EFI_DEVICE_PATH *imgpath;
 static EFI_DEVICE_PATH *imgprefix;
 
-#ifdef	EFI_ZFS_BOOT
-bool
-efi_zfs_is_preferred(EFI_HANDLE *h)
-{
-        return (h == img->DeviceHandle);
-}
-#endif
-
 static int
 has_keyboard(void)
 {
@@ -342,6 +334,15 @@ find_currdev(void)
 #endif
         return (ENOENT);
 }
+
+
+#ifdef	EFI_ZFS_BOOT
+bool
+efi_zfs_is_preferred(EFI_HANDLE *h)
+{
+        return (h == img->DeviceHandle || check_preferred(h));
+}
+#endif
 
 EFI_STATUS
 main(int argc, CHAR16 *argv[])
