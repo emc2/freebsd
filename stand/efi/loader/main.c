@@ -339,7 +339,6 @@ find_currdev(void)
         return (ENOENT);
 }
 
-
 #ifdef	EFI_ZFS_BOOT
 bool
 efi_zfs_is_preferred(EFI_HANDLE *h)
@@ -410,11 +409,6 @@ main(int argc, CHAR16 *argv[])
         if ((imgprefix = efi_devpath_trim(imgpath)) == NULL) {
                 panic("Couldn't trim device path");
         }
-
-	for (i = 0; efi_drivers[i] != NULL; i++) {
-                if (efi_drivers[i]->init != NULL)
-			efi_drivers[i]->init();
-	}
 
 	/*
 	 * Parse the args to set the console settings, etc boot1.efi
