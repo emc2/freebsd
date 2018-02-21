@@ -6,21 +6,16 @@
 #   quite large.
 #
 
-MK_PROFILE=	no
-MK_SSP=		no
-
 .include <bsd.init.mk>
 
-INTERNALLIB=
 LIBSA_CPUARCH?=${MACHINE_CPUARCH}
 LIBC_SRC=	${SRCTOP}/lib/libc
 
 LIB?=		sa
-NO_PIC=
 
 # standalone components and stuff we have modified locally
-SRCS+=	gzguts.h zutil.h __main.c assert.c bcd.c environment.c getopt.c gets.c \
-	globals.c pager.c panic.c printf.c strdup.c strerror.c strtol.c strtoul.c \
+SRCS+=	gzguts.h zutil.h __main.c abort.c assert.c bcd.c environment.c getopt.c gets.c \
+	globals.c pager.c panic.c printf.c strdup.c strerror.c \
 	random.c sbrk.c twiddle.c zalloc.c zalloc_malloc.c
 
 # private (pruned) versions of libc string functions
@@ -36,7 +31,12 @@ SRCS+=	bcmp.c bcopy.c bzero.c ffs.c fls.c \
 	memccpy.c memchr.c memcmp.c memcpy.c memmove.c memset.c \
 	qdivrem.c strcat.c strchr.c strcmp.c strcpy.c stpcpy.c stpncpy.c \
 	strcspn.c strlcat.c strlcpy.c strlen.c strncat.c strncmp.c strncpy.c \
-	strpbrk.c strrchr.c strsep.c strspn.c strstr.c strtok.c swab.c
+	strnlen.c strpbrk.c strrchr.c strsep.c strspn.c strstr.c strtok.c swab.c
+
+# stdlib functions from libc
+.PATH: ${LIBC_SRC}/stdlib
+SRCS+=	abs.c strtol.c strtoll.c strtoul.c strtoull.c
+
 .if ${MACHINE_CPUARCH} == "arm"
 .PATH: ${LIBC_SRC}/arm/gen
 
@@ -97,10 +97,15 @@ SRCS+=	infback.c inffast.c inflate.c inftrees.c zutil.c
 
 # Create a subset of includes that are safe, as well as adjusting those that aren't
 # The lists may drive people nuts, but they are explicitly opt-in
+FAKE_DIRS=xlocale arpa
+SAFE_INCS=a.out.h assert.h elf.h limits.h nlist.h setjmp.h stddef.h stdbool.h string.h strings.h time.h unistd.h uuid.h
+STAND_H_INC=ctype.h fcntl.h signal.h stdio.h stdlib.h
+OTHER_INC=stdarg.h errno.h stdint.h
+
 beforedepend:
 	echo beforedepend; \
-	mkdir -p xlocale arpa; \
-	for i in a.out.h assert.h elf.h limits.h nlist.h setjmp.h stddef.h stdbool.h string.h strings.h time.h unistd.h uuid.h; do \
+	mkdir -p ${FAKE_DIRS}; \
+	for i in ${SAFE_INCS}; do \
 		ln -sf ${SRCTOP}/include/$$i $$i; \
 	done; \
 	ln -sf ${SYSDIR}/${MACHINE}/include/stdarg.h stdarg.h; \
@@ -111,9 +116,11 @@ beforedepend:
 	for i in _time.h _strings.h _string.h; do \
 		[ -f xlocale/$$i ] || cp /dev/null xlocale/$$i; \
 	done; \
-	for i in ctype.h fcntl.h stdio.h stdlib.h; do \
+	for i in ${STAND_H_INC}; do \
 		ln -sf ${SASRC}/stand.h $$i; \
 	done
+CLEANDIRS+=${FAKE_DIRS}
+CLEANFILES+= ${SAFE_INCS} ${STAND_H_INC} ${OTHER_INC}
 
 # io routines
 SRCS+=	closeall.c dev.c ioctl.c nullfs.c stat.c \
@@ -134,11 +141,14 @@ SRCS+=	pkgfs.c
 SRCS+=	nandfs.c
 .endif
 
+# kernel ufs support
+.PATH: ${SRCTOP}/sys/ufs/ffs
+SRCS+=ffs_subr.c ffs_tables.c
+
 CFLAGS.bzipfs.c+= -I${SRCTOP}/contrib/bzip2
 
 # explicit_bzero
 .PATH: ${SYSDIR}/libkern
 SRCS+=  explicit_bzero.c
 
-.include <bsd.stand.mk>
 .include <bsd.lib.mk>

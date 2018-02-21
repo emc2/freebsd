@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD$");
 #include <efi.h>
 #include <efilib.h>
 #include <efiprot.h>
+#include <efichar.h>
 #include <disk.h>
 
 static EFI_GUID blkio_guid = BLOCK_IO_PROTOCOL;
@@ -148,7 +149,7 @@ efiblk_pdinfo_count(pdinfo_list_t *pdi)
 	return (i);
 }
 
-static int
+int
 efipart_inithandles(void)
 {
 	UINTN sz;
@@ -176,6 +177,10 @@ efipart_inithandles(void)
 
 	efipart_handles = hin;
 	efipart_nhandles = sz;
+#ifdef EFIPART_DEBUG
+	printf("%s: Got %d BLOCK IO MEDIA handle(s)\n", __func__,
+	    efipart_nhandles);
+#endif
 	return (0);
 }
 
@@ -319,11 +324,7 @@ efipart_updatefd(void)
 static int
 efipart_initfd(void)
 {
-	int rv;
 
-	rv = efipart_inithandles();
-	if (rv != 0)
-		return (rv);
 	STAILQ_INIT(&fdinfo);
 
 	efipart_updatefd();
@@ -439,11 +440,7 @@ efipart_updatecd(void)
 static int
 efipart_initcd(void)
 {
-	int rv;
 
-	rv = efipart_inithandles();
-	if (rv != 0)
-		return (rv);
 	STAILQ_INIT(&cdinfo);
 
 	efipart_updatecd();
@@ -652,8 +649,7 @@ efipart_hdinfo_add_filepath(EFI_HANDLE disk_handle)
 		unit = 0;
 
 	/* FILEPATH_DEVICE_PATH has 0 terminated string */
-	for (len = 0; node->PathName[len] != 0; len++)
-		;
+	len = ucs2len(node->PathName);
 	if ((pathname = malloc(len + 1)) == NULL) {
 		printf("Failed to add disk, out of memory\n");
 		free(pd);
@@ -800,11 +796,7 @@ efipart_updatehd(void)
 static int
 efipart_inithd(void)
 {
-	int rv;
 
-	rv = efipart_inithandles();
-	if (rv != 0)
-		return (rv);
 	STAILQ_INIT(&hdinfo);
 
 	efipart_updatehd();

@@ -44,6 +44,14 @@ dobuild()
 top=$(make -V SRCTOP)
 cd $top/stand
 
+# Build without forth
+for i in \
+	amd64/amd64 \
+	i386/i386 \
+	; do
+    ta=${i##*/}
+    dobuild $ta _.boot.${ta}.no_forth.log "WITHOUT_FORTH=yes"
+done
 
 # Build without GELI
 for i in \
@@ -66,6 +74,20 @@ for i in \
 	; do
     ta=${i##*/}
     dobuild $ta _.boot.${ta}.log ""
+done
+
+# Default build for a goodly selection of architectures with Lua
+for i in \
+	amd64/amd64 \
+	arm/arm arm/armeb arm/armv7 \
+	arm64/aarch64 \
+	i386/i386 \
+	mips/mips mips/mips64 \
+	powerpc/powerpc powerpc/powerpc64 \
+	sparc64/sparc64 \
+	; do
+    ta=${i##*/}
+    dobuild $ta _.boot.${ta}.lua.log "MK_LOADEDER_LUA=yes MK_FORTH=no"
 done
 
 # Build w/o ZFS

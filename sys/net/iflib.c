@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2014-2017, Matthew Macy <mmacy@nextbsd.org>
+ * Copyright (c) 2014-2017, Matthew Macy <mmacy@mattmacy.io>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,6 +31,7 @@ __FBSDID("$FreeBSD$");
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_acpi.h"
+#include "opt_sched.h"
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -1067,7 +1068,6 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	if (netmap_no_pendintr || force_update) {
 		int crclen = iflib_crcstrip ? 0 : 4;
 		int error, avail;
-		uint16_t slot_flags = kring->nkr_slot_flags;
 
 		for (i = 0; i < rxq->ifr_nfl; i++) {
 			fl = &rxq->ifr_fl[i];
@@ -1083,7 +1083,7 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 
 				error = ctx->isc_rxd_pkt_get(ctx->ifc_softc, &ri);
 				ring->slot[nm_i].len = error ? 0 : ri.iri_len - crclen;
-				ring->slot[nm_i].flags = slot_flags;
+				ring->slot[nm_i].flags = 0;
 				if (fl->ifl_sds.ifsd_map)
 					bus_dmamap_sync(fl->ifl_ifdi->idi_tag,
 							fl->ifl_sds.ifsd_map[nic_i], BUS_DMASYNC_POSTREAD);
@@ -1983,7 +1983,8 @@ iflib_fl_bufs_free(iflib_fl_t fl)
 			if (fl->ifl_sds.ifsd_map != NULL) {
 				bus_dmamap_t sd_map = fl->ifl_sds.ifsd_map[i];
 				bus_dmamap_unload(fl->ifl_desc_tag, sd_map);
-				bus_dmamap_destroy(fl->ifl_desc_tag, sd_map);
+				if (fl->ifl_rxq->ifr_ctx->ifc_in_detach)
+					bus_dmamap_destroy(fl->ifl_desc_tag, sd_map);
 			}
 			if (*sd_m != NULL) {
 				m_init(*sd_m, M_NOWAIT, MT_DATA, 0);
@@ -2631,8 +2632,11 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 					mt = mf = NULL;
 				}
 			}
-			if (lro_possible && tcp_lro_rx(&rxq->ifr_lc, m, 0) == 0)
-				continue;
+			if ((m->m_pkthdr.csum_flags & (CSUM_L4_CALC|CSUM_L4_VALID)) ==
+			    (CSUM_L4_CALC|CSUM_L4_VALID)) {
+				if (lro_possible && tcp_lro_rx(&rxq->ifr_lc, m, 0) == 0)
+					continue;
+			}
 		}
 #endif
 		if (lro_possible) {
@@ -3112,7 +3116,7 @@ calc_next_txd(iflib_txq_t txq, int cidx, uint8_t qid)
  * min_frame_size is the frame size (less CRC) to pad the mbuf to
  */
 static __noinline int
-iflib_ether_pad(device_t dev, struct mbuf *m_head, uint16_t min_frame_size)
+iflib_ether_pad(device_t dev, struct mbuf **m_head, uint16_t min_frame_size)
 {
 	/*
 	 * 18 is enough bytes to pad an ARP packet to 46 bytes, and
@@ -3120,14 +3124,27 @@ iflib_ether_pad(device_t dev, struct mbuf *m_head, uint16_t min_frame_size)
 	 */
 	static char pad[18];	/* just zeros */
 	int n;
+	struct mbuf *new_head;
 
-	for (n = min_frame_size - m_head->m_pkthdr.len;
+	if (!M_WRITABLE(*m_head)) {
+		new_head = m_dup(*m_head, M_NOWAIT);
+		if (new_head == NULL) {
+			m_freem(*m_head);
+			device_printf(dev, "cannot pad short frame, m_dup() failed");
+			DBG_COUNTER_INC(encap_pad_mbuf_fail);
+			return ENOMEM;
+		}
+		m_freem(*m_head);
+		*m_head = new_head;
+	}
+
+	for (n = min_frame_size - (*m_head)->m_pkthdr.len;
 	     n > 0; n -= sizeof(pad))
-		if (!m_append(m_head, min(n, sizeof(pad)), pad))
+		if (!m_append(*m_head, min(n, sizeof(pad)), pad))
 			break;
 
 	if (n > 0) {
-		m_freem(m_head);
+		m_freem(*m_head);
 		device_printf(dev, "cannot pad short frame\n");
 		DBG_COUNTER_INC(encap_pad_mbuf_fail);
 		return (ENOBUFS);
@@ -3189,13 +3206,13 @@ iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 		desc_tag = txq->ift_desc_tag;
 		max_segs = scctx->isc_tx_nsegments;
 	}
-	m_head = *m_headp;
 	if ((sctx->isc_flags & IFLIB_NEED_ETHER_PAD) &&
 	    __predict_false(m_head->m_pkthdr.len < scctx->isc_min_frame_size)) {
-		err = iflib_ether_pad(ctx->ifc_dev, m_head, scctx->isc_min_frame_size);
+		err = iflib_ether_pad(ctx->ifc_dev, m_headp, scctx->isc_min_frame_size);
 		if (err)
 			return err;
 	}
+	m_head = *m_headp;
 
 	pkt_info_zero(&pi);
 	pi.ipi_mflags = (m_head->m_flags & (M_VLANTAG|M_BCAST|M_MCAST));
@@ -5031,23 +5048,133 @@ iflib_irq_alloc(if_ctx_t ctx, if_irq_t irq, int rid,
 	return (_iflib_irq_alloc(ctx, irq, rid, filter, handler, arg, name));
 }
 
+#ifdef SMP
 static int
-find_nth(if_ctx_t ctx, cpuset_t *cpus, int qid)
+find_nth(if_ctx_t ctx, int qid)
 {
+	cpuset_t cpus;
 	int i, cpuid, eqid, count;
 
-	CPU_COPY(&ctx->ifc_cpus, cpus);
-	count = CPU_COUNT(cpus);
+	CPU_COPY(&ctx->ifc_cpus, &cpus);
+	count = CPU_COUNT(&cpus);
 	eqid = qid % count;
 	/* clear up to the qid'th bit */
 	for (i = 0; i < eqid; i++) {
-		cpuid = CPU_FFS(cpus);
+		cpuid = CPU_FFS(&cpus);
 		MPASS(cpuid != 0);
-		CPU_CLR(cpuid-1, cpus);
+		CPU_CLR(cpuid-1, &cpus);
 	}
-	cpuid = CPU_FFS(cpus);
+	cpuid = CPU_FFS(&cpus);
 	MPASS(cpuid != 0);
 	return (cpuid-1);
+}
+
+#ifdef SCHED_ULE
+extern struct cpu_group *cpu_top;              /* CPU topology */
+
+static int
+find_child_with_core(int cpu, struct cpu_group *grp)
+{
+	int i;
+
+	if (grp->cg_children == 0)
+		return -1;
+
+	MPASS(grp->cg_child);
+	for (i = 0; i < grp->cg_children; i++) {
+		if (CPU_ISSET(cpu, &grp->cg_child[i].cg_mask))
+			return i;
+	}
+
+	return -1;
+}
+
+/*
+ * Find the nth thread on the specified core
+ */
+static int
+find_thread(int cpu, int thread_num)
+{
+	struct cpu_group *grp;
+	int i;
+	cpuset_t cs;
+
+	grp = cpu_top;
+	if (grp == NULL)
+		return cpu;
+	i = 0;
+	while ((i = find_child_with_core(cpu, grp)) != -1) {
+		/* If the child only has one cpu, don't descend */
+		if (grp->cg_child[i].cg_count <= 1)
+			break;
+		grp = &grp->cg_child[i];
+	}
+
+	/* If they don't share at least an L2 cache, use the same CPU */
+	if (grp->cg_level > CG_SHARE_L2 || grp->cg_level == CG_SHARE_NONE)
+		return cpu;
+
+	/* Now pick one */
+	CPU_COPY(&grp->cg_mask, &cs);
+	for (i = thread_num % grp->cg_count; i > 0; i--) {
+		MPASS(CPU_FFS(&cs));
+		CPU_CLR(CPU_FFS(&cs) - 1, &cs);
+	}
+	MPASS(CPU_FFS(&cs));
+	return CPU_FFS(&cs) - 1;
+}
+#else
+static int
+find_thread(int cpu, int thread_num __unused)
+{
+	return cpu;
+}
+#endif
+
+static int
+get_thread_num(if_ctx_t ctx, iflib_intr_type_t type, int qid)
+{
+	switch (type) {
+	case IFLIB_INTR_TX:
+		/* TX queues get threads on the same core as the corresponding RX queue */
+		/* XXX handle multiple RX threads per core and more than two threads per core */
+		return qid / CPU_COUNT(&ctx->ifc_cpus) + 1;
+	case IFLIB_INTR_RX:
+	case IFLIB_INTR_RXTX:
+		/* RX queues get the first thread on their core */
+		return qid / CPU_COUNT(&ctx->ifc_cpus);
+	default:
+		return -1;
+	}
+}
+#else
+#define get_thread_num(ctx, type, qid)	CPU_FIRST()
+#define find_thread(cpuid, tid)		CPU_FIRST()
+#define find_nth(ctx, gid)		CPU_FIRST()
+#endif
+
+/* Just to avoid copy/paste */
+static inline int
+iflib_irq_set_affinity(if_ctx_t ctx, int irq, iflib_intr_type_t type, int qid,
+    struct grouptask *gtask, struct taskqgroup *tqg, void *uniq, char *name)
+{
+	int cpuid;
+	int err, tid;
+
+	cpuid = find_nth(ctx, qid);
+	tid = get_thread_num(ctx, type, qid);
+	MPASS(tid >= 0);
+	cpuid = find_thread(cpuid, tid);
+	err = taskqgroup_attach_cpu(tqg, gtask, uniq, cpuid, irq, name);
+	if (err) {
+		device_printf(ctx->ifc_dev, "taskqgroup_attach_cpu failed %d\n", err);
+		return (err);
+	}
+#ifdef notyet
+	if (cpuid > ctx->ifc_cpuid_highest)
+		ctx->ifc_cpuid_highest = cpuid;
+#endif
+	return 0;
 }
 
 int
@@ -5058,9 +5185,8 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	struct grouptask *gtask;
 	struct taskqgroup *tqg;
 	iflib_filter_info_t info;
-	cpuset_t cpus;
 	gtask_fn_t *fn;
-	int tqrid, err, cpuid;
+	int tqrid, err;
 	driver_filter_t *intr_fast;
 	void *q;
 
@@ -5123,8 +5249,9 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		return (0);
 
 	if (tqrid != -1) {
-		cpuid = find_nth(ctx, &cpus, qid);
-		taskqgroup_attach_cpu(tqg, gtask, q, cpuid, rman_get_start(irq->ii_res), name);
+		err = iflib_irq_set_affinity(ctx, rman_get_start(irq->ii_res), type, qid, gtask, tqg, q, name);
+		if (err)
+			return (err);
 	} else {
 		taskqgroup_attach(tqg, gtask, q, rman_get_start(irq->ii_res), name);
 	}
@@ -5140,6 +5267,7 @@ iflib_softirq_alloc_generic(if_ctx_t ctx, if_irq_t irq, iflib_intr_type_t type, 
 	gtask_fn_t *fn;
 	void *q;
 	int irq_num = -1;
+	int err;
 
 	switch (type) {
 	case IFLIB_INTR_TX:
@@ -5168,7 +5296,14 @@ iflib_softirq_alloc_generic(if_ctx_t ctx, if_irq_t irq, iflib_intr_type_t type, 
 		panic("unknown net intr type");
 	}
 	GROUPTASK_INIT(gtask, 0, fn, q);
-	taskqgroup_attach(tqg, gtask, q, irq_num, name);
+	if (irq_num != -1) {
+		err = iflib_irq_set_affinity(ctx, irq_num, type, qid, gtask, tqg, q, name);
+		if (err)
+			taskqgroup_attach(tqg, gtask, q, irq_num, name);
+	}
+	else {
+		taskqgroup_attach(tqg, gtask, q, irq_num, name);
+	}
 }
 
 void
@@ -5212,10 +5347,10 @@ iflib_legacy_setup(if_ctx_t ctx, driver_filter_t filter, void *filter_arg, int *
 	if ((err = _iflib_irq_alloc(ctx, irq, tqrid, iflib_fast_intr_ctx, NULL, info, name)) != 0)
 		return (err);
 	GROUPTASK_INIT(gtask, 0, fn, q);
-	taskqgroup_attach(tqg, gtask, q, tqrid, name);
+	taskqgroup_attach(tqg, gtask, q, rman_get_start(irq->ii_res), name);
 
 	GROUPTASK_INIT(&txq->ift_task, 0, _task_fn_tx, txq);
-	taskqgroup_attach(qgroup_if_io_tqg, &txq->ift_task, txq, tqrid, "tx");
+	taskqgroup_attach(qgroup_if_io_tqg, &txq->ift_task, txq, rman_get_start(irq->ii_res), "tx");
 	return (0);
 }
 

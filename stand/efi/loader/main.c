@@ -66,8 +66,12 @@ EFI_GUID imgid = LOADED_IMAGE_PROTOCOL;
 EFI_GUID mps = MPS_TABLE_GUID;
 EFI_GUID netid = EFI_SIMPLE_NETWORK_PROTOCOL;
 EFI_GUID smbios = SMBIOS_TABLE_GUID;
+EFI_GUID smbios3 = SMBIOS3_TABLE_GUID;
 EFI_GUID dxe = DXE_SERVICES_TABLE_GUID;
 EFI_GUID hoblist = HOB_LIST_TABLE_GUID;
+EFI_GUID lzmadecomp = LZMA_DECOMPRESSION_GUID;
+EFI_GUID mpcore = ARM_MP_CORE_INFO_TABLE_GUID;
+EFI_GUID esrt = ESRT_TABLE_GUID;
 EFI_GUID memtype = MEMORY_TYPE_INFORMATION_TABLE_GUID;
 EFI_GUID debugimg = DEBUG_IMAGE_INFO_TABLE_GUID;
 EFI_GUID fdtdtb = FDT_TABLE_GUID;
@@ -510,11 +514,15 @@ main(int argc, CHAR16 *argv[])
 	}
 
 	/*
-	 * March through the device switch probing for things.
+	 * Scan the BLOCK IO MEDIA handles then
+	 * march through the device switch probing for things.
 	 */
-	for (i = 0; devsw[i] != NULL; i++)
-		if (devsw[i]->dv_init != NULL)
-			(devsw[i]->dv_init)();
+	if ((i = efipart_inithandles()) == 0) {
+		for (i = 0; devsw[i] != NULL; i++)
+			if (devsw[i]->dv_init != NULL)
+				(devsw[i]->dv_init)();
+	} else
+		printf("efipart_inithandles failed %d, expect failures", i);
 
 	printf("Command line arguments:");
 	for (i = 0; i < argc; i++)
@@ -559,7 +567,7 @@ main(int argc, CHAR16 *argv[])
 #endif
 	}
 
-	interact(NULL);			/* doesn't return */
+	interact();			/* doesn't return */
 
 	return (EFI_SUCCESS);		/* keep compiler happy */
 }
@@ -713,10 +721,18 @@ command_configuration(int argc, char *argv[])
 		else if (!memcmp(guid, &smbios, sizeof(EFI_GUID)))
 			printf("SMBIOS Table %p",
 			    ST->ConfigurationTable[i].VendorTable);
+		else if (!memcmp(guid, &smbios3, sizeof(EFI_GUID)))
+			printf("SMBIOS3 Table");
 		else if (!memcmp(guid, &dxe, sizeof(EFI_GUID)))
 			printf("DXE Table");
 		else if (!memcmp(guid, &hoblist, sizeof(EFI_GUID)))
 			printf("HOB List Table");
+		else if (!memcmp(guid, &lzmadecomp, sizeof(EFI_GUID)))
+			printf("LZMA Compression");
+		else if (!memcmp(guid, &mpcore, sizeof(EFI_GUID)))
+			printf("ARM MpCore Information Table");
+		else if (!memcmp(guid, &esrt, sizeof(EFI_GUID)))
+			printf("ESRT Table");
 		else if (!memcmp(guid, &memtype, sizeof(EFI_GUID)))
 			printf("Memory Type Information Table");
 		else if (!memcmp(guid, &debugimg, sizeof(EFI_GUID)))
@@ -788,61 +804,6 @@ command_mode(int argc, char *argv[])
 
 	return (CMD_OK);
 }
-
-#ifdef EFI_ZFS_BOOT
-COMMAND_SET(lszfs, "lszfs", "list child datasets of a zfs dataset",
-    command_lszfs);
-
-static int
-command_lszfs(int argc, char *argv[])
-{
-	int err;
-
-	if (argc != 2) {
-		command_errmsg = "wrong number of arguments";
-		return (CMD_ERROR);
-	}
-
-	err = zfs_list(argv[1]);
-	if (err != 0) {
-		command_errmsg = strerror(err);
-		return (CMD_ERROR);
-	}
-	return (CMD_OK);
-}
-
-COMMAND_SET(reloadbe, "reloadbe", "refresh the list of ZFS Boot Environments",
-	    command_reloadbe);
-
-static int
-command_reloadbe(int argc, char *argv[])
-{
-	int err;
-	char *root;
-
-	if (argc > 2) {
-		command_errmsg = "wrong number of arguments";
-		return (CMD_ERROR);
-	}
-
-	if (argc == 2) {
-		err = zfs_bootenv(argv[1]);
-	} else {
-		root = getenv("zfs_be_root");
-		if (root == NULL) {
-			return (CMD_OK);
-		}
-		err = zfs_bootenv(root);
-	}
-
-	if (err != 0) {
-		command_errmsg = strerror(err);
-		return (CMD_ERROR);
-	}
-
-	return (CMD_OK);
-}
-#endif
 
 #ifdef LOADER_FDT_SUPPORT
 extern int command_fdt_internal(int argc, char *argv[]);

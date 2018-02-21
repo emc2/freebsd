@@ -32,15 +32,12 @@ __FBSDID("$FreeBSD$");
 
 #include <btxv86.h>
 
-/* Forward declared to avoid warnings -- these shouldn't be needed */
-int strcasecmp(const char *s1, const char *s2);
-void explicit_bzero(void *b, size_t len);
+#include "stand.h"
 
 #include "bootargs.h"
 #include "lib.h"
 #include "rbx.h"
 #include "drv.h"
-#include "util.h"
 #include "cons.h"
 #include "gpt.h"
 #include "paths.h"
@@ -105,38 +102,13 @@ static struct bios_smap smap;
 static char *heap_next;
 static char *heap_end;
 
-void exit(int);
 static void load(void);
 static int parse_cmds(char *, int *);
 static int dskread(void *, daddr_t, unsigned);
-void *malloc(size_t n);
-void free(void *ptr);
 #ifdef LOADER_GELI_SUPPORT
 static int vdev_read(void *vdev __unused, void *priv, off_t off, void *buf,
 	size_t bytes);
 #endif
-
-void *
-malloc(size_t n)
-{
-	char *p = heap_next;
-	if (p + n > heap_end) {
-		printf("malloc failure\n");
-		for (;;)
-		    ;
-		/* NOTREACHED */
-		return (0);
-	}
-	heap_next += n;
-	return (p);
-}
-
-void
-free(void *ptr)
-{
-
-	return;
-}
 
 #include "ufsread.c"
 #include "gpt.c"
@@ -291,6 +263,7 @@ main(void)
 		heap_next = (char *)dmadat + sizeof(*dmadat);
 		heap_end = (char *)PTOV(bios_basemem);
 	}
+	setheap(heap_next, heap_end);
 
 	v86.ctl = V86_FLAGS;
 	v86.efl = PSL_RESERVED_DEFAULT | PSL_I;
@@ -391,6 +364,8 @@ main(void)
 void
 exit(int x)
 {
+	while (1);
+	__unreachable();
 }
 
 static void

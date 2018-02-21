@@ -255,7 +255,6 @@ pt_entry_t *CMAP3;
 static pd_entry_t *KPTD;
 caddr_t ptvmmap = 0;
 caddr_t CADDR3;
-struct msgbuf *msgbufp = NULL;
 
 /*
  * Crashdump maps.
@@ -280,6 +279,8 @@ SYSCTL_INT(_debug, OID_AUTO, PMAP1unchanged, CTLFLAG_RD,
 	   &PMAP1unchanged, 0,
 	   "Number of times pmap_pte_quick didn't change PMAP1");
 static struct mtx PMAP2mutex;
+
+int pti;
 
 static void	free_pv_chunk(struct pv_chunk *pc);
 static void	free_pv_entry(pmap_t pmap, pv_entry_t pv);
@@ -339,8 +340,8 @@ static pt_entry_t *pmap_pte_quick(pmap_t pmap, vm_offset_t va);
 static void pmap_pte_release(pt_entry_t *pte);
 static int pmap_unuse_pt(pmap_t, vm_offset_t, struct spglist *);
 #if defined(PAE) || defined(PAE_TABLES)
-static void *pmap_pdpt_allocf(uma_zone_t zone, vm_size_t bytes, uint8_t *flags,
-    int wait);
+static void *pmap_pdpt_allocf(uma_zone_t zone, vm_size_t bytes, int domain,
+    uint8_t *flags, int wait);
 #endif
 static void pmap_set_pg(void);
 
@@ -494,9 +495,13 @@ pmap_bootstrap(vm_paddr_t firstaddr)
 	virtual_avail = va;
 
 	/*
-	 * Leave in place an identity mapping (virt == phys) for the low 1 MB
-	 * physical memory region that is used by the ACPI wakeup code.  This
-	 * mapping must not have PG_G set. 
+	 * Finish removing the identity mapping (virt == phys) of low memory.
+	 * It was only used for 2 instructions in locore.  locore then
+	 * unmapped the first PTD to get some null pointer checks.  ACPI
+	 * wakeup will map the first PTD transiently to use it for 1
+	 * instruction.  The double mapping for low memory is not usable in
+	 * normal operation since it breaks trapping of null pointers and
+	 * causes inconsistencies in page tables when combined with PG_G.
 	 */
 	for (i = 1; i < NKPT; i++)
 		PTD[i] = 0;
@@ -663,7 +668,7 @@ pmap_set_pg(void)
 	endva = KERNBASE + KERNend;
 
 	if (pseflag) {
-		va = KERNBASE + KERNLOAD;
+		va = KERNBASE + roundup2(KERNLOAD, NBPDR);
 		while (va  < endva) {
 			pdir_pde(PTD, va) |= pgeflag;
 			invltlb();	/* Flush non-PG_G entries. */
@@ -694,12 +699,13 @@ pmap_page_init(vm_page_t m)
 
 #if defined(PAE) || defined(PAE_TABLES)
 static void *
-pmap_pdpt_allocf(uma_zone_t zone, vm_size_t bytes, uint8_t *flags, int wait)
+pmap_pdpt_allocf(uma_zone_t zone, vm_size_t bytes, int domain, uint8_t *flags,
+    int wait)
 {
 
 	/* Inform UMA that this allocator uses kernel_map/object. */
 	*flags = UMA_SLAB_KERNEL;
-	return ((void *)kmem_alloc_contig(kernel_arena, bytes, wait, 0x0ULL,
+	return ((void *)kmem_alloc_contig_domain(domain, bytes, wait, 0x0ULL,
 	    0xffffffffULL, 1, 0, VM_MEMATTR_DEFAULT));
 }
 #endif
@@ -1039,7 +1045,7 @@ pmap_invalidate_page(pmap_t pmap, vm_offset_t va)
 		CPU_AND(&other_cpus, &pmap->pm_active);
 		mask = &other_cpus;
 	}
-	smp_masked_invlpg(*mask, va);
+	smp_masked_invlpg(*mask, va, pmap);
 	sched_unpin();
 }
 
@@ -1073,7 +1079,7 @@ pmap_invalidate_range(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 		CPU_AND(&other_cpus, &pmap->pm_active);
 		mask = &other_cpus;
 	}
-	smp_masked_invlpg_range(*mask, sva, eva);
+	smp_masked_invlpg_range(*mask, sva, eva, pmap);
 	sched_unpin();
 }
 
@@ -1671,7 +1677,11 @@ pmap_qenter(vm_offset_t sva, vm_page_t *ma, int count)
 		pa = VM_PAGE_TO_PHYS(m) | pmap_cache_bits(m->md.pat_mode, 0);
 		if ((*pte & (PG_FRAME | PG_PTE_CACHE)) != pa) {
 			oldpte |= *pte;
+#if defined(PAE) || defined(PAE_TABLES)
+			pte_store(pte, pa | pgeflag | pg_nx | PG_RW | PG_V);
+#else
 			pte_store(pte, pa | pgeflag | PG_RW | PG_V);
+#endif
 		}
 		pte++;
 	}
@@ -1712,7 +1722,7 @@ pmap_free_zero_pages(struct spglist *free)
 		/* Preserve the page's PG_ZERO setting. */
 		vm_page_free_toq(m);
 	}
-	atomic_subtract_int(&vm_cnt.v_wire_count, count);
+	vm_wire_sub(count);
 }
 
 /*
@@ -1883,10 +1893,9 @@ pmap_pinit(pmap_t pmap)
 		m = vm_page_alloc(NULL, 0, VM_ALLOC_NORMAL | VM_ALLOC_NOOBJ |
 		    VM_ALLOC_WIRED | VM_ALLOC_ZERO);
 		if (m == NULL)
-			VM_WAIT;
-		else {
+			vm_wait(NULL);
+		else
 			ptdpg[i++] = m;
-		}
 	}
 
 	pmap_qenter((vm_offset_t)pmap->pm_pdir, ptdpg, NPGPTD);
@@ -1935,7 +1944,7 @@ _pmap_allocpte(pmap_t pmap, u_int ptepindex, u_int flags)
 		if ((flags & PMAP_ENTER_NOSLEEP) == 0) {
 			PMAP_UNLOCK(pmap);
 			rw_wunlock(&pvh_global_lock);
-			VM_WAIT;
+			vm_wait(NULL);
 			rw_wlock(&pvh_global_lock);
 			PMAP_LOCK(pmap);
 		}
@@ -2051,10 +2060,9 @@ pmap_release(pmap_t pmap)
 		KASSERT(VM_PAGE_TO_PHYS(m) == (pmap->pm_pdpt[i] & PG_FRAME),
 		    ("pmap_release: got wrong ptd page"));
 #endif
-		m->wire_count--;
+		vm_page_unwire_noq(m);
 		vm_page_free_zero(m);
 	}
-	atomic_subtract_int(&vm_cnt.v_wire_count, NPGPTD);
 }
 
 static int

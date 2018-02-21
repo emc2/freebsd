@@ -1,11 +1,6 @@
 # $FreeBSD$
 
-MAN=
-
 .include <bsd.init.mk>
-
-MK_SSP=		no
-MK_FORTH=	no
 
 PROG=		boot1.sym
 INTERNALPROG=
@@ -34,7 +29,7 @@ SRCS+=		zfs_module.c
 CFLAGS.zfs_module.c+=	-I${ZFSSRC}
 CFLAGS.zfs_module.c+=	-I${SYSDIR}/cddl/boot/zfs
 CFLAGS.zfs_module.c+=	-I${SYSDIR}/crypto/skein
-CFLAGS.zfs_module.c+=	-DEFI_ZFS_BOOT
+CFLAGS+=	-DEFI_ZFS_BOOT
 LIBZFSBOOT=	${BOOTOBJ}/zfs/libzfsboot.a
 .endif
 
@@ -110,7 +105,7 @@ boot1.efi: ${PROG}
 # The following inserts our objects into a template FAT file system
 # created by generate-fat.sh
 
-.include "${.CURDIR}/Makefile.fat"
+.include "Makefile.fat"
 
 boot1.efifat: boot1.efi
 	@set -- `ls -l ${.ALLSRC}`; \
@@ -120,7 +115,7 @@ boot1.efifat: boot1.efi
 	    exit 1; \
 	fi
 	echo ${.OBJDIR}
-	xz -d -c ${.CURDIR}/fat-${MACHINE}.tmpl.xz > ${.TARGET}
+	xz -d -c ${BOOTSRC}/efi/boot1/fat-${MACHINE}.tmpl.xz > ${.TARGET}
 	${DD} if=${.ALLSRC} of=${.TARGET} seek=${BOOT1_OFFSET} conv=notrunc
 
 CLEANFILES+= boot1.efi boot1.efifat

@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ *
  * Copyright (c) 2015-2016 Landon Fuller <landon@landonf.org>
  * Copyright (c) 2016 Michael Zhilin <mizhka@gmail.com>
  * Copyright (c) 2017 The FreeBSD Foundation
@@ -248,6 +250,9 @@ chipc_detach(device_t dev)
 	if ((error = bus_generic_detach(dev)))
 		return (error);
 
+	if ((error = device_delete_children(dev)))
+		return (error);
+
 	if ((error = bhnd_deregister_provider(dev, BHND_SERVICE_ANY)))
 		return (error);
 
@@ -293,13 +298,13 @@ chipc_add_children(struct chipc_softc *sc)
 	 * attached directly to the bhnd(4) bus -- not chipc.
 	 */
 	if (sc->caps.pmu && !sc->caps.aob) {
-		child = BUS_ADD_CHILD(sc->dev, 0, "bhnd_pmu", 0);
+		child = BUS_ADD_CHILD(sc->dev, 0, "bhnd_pmu", -1);
 		if (child == NULL) {
 			device_printf(sc->dev, "failed to add pmu\n");
 			return (ENXIO);
 		}
 	} else if (sc->caps.pwr_ctrl) {
-		child = BUS_ADD_CHILD(sc->dev, 0, "bhnd_pwrctl", 0);
+		child = BUS_ADD_CHILD(sc->dev, 0, "bhnd_pwrctl", -1);
 		if (child == NULL) {
 			device_printf(sc->dev, "failed to add pwrctl\n");
 			return (ENXIO);
@@ -307,7 +312,7 @@ chipc_add_children(struct chipc_softc *sc)
 	}
 
 	/* GPIO */
-	child = BUS_ADD_CHILD(sc->dev, 0, "gpio", 0);
+	child = BUS_ADD_CHILD(sc->dev, 0, "gpio", -1);
 	if (child == NULL) {
 		device_printf(sc->dev, "failed to add gpio\n");
 		return (ENXIO);
