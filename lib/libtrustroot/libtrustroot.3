@@ -24,21 +24,46 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd April 25, 2017
-.Dt TRUST-CONFIG 7
+.Dd August 2, 2018
+.Dt LIBTRUSTROOT 3
 .Os
 .Sh NAME
-.Nm trust-config
-.Nd "trust system configuration"
+.Nm libtrustroot
+.Nm trustroot_start
+.Nm trustroot_next
+.Nm trustroot_name
+.Nm trustroot_size
+.Nm trustroot_data
+.Nd "embeddable trust root certificates"
+.Sh LIBRARY
+Trust Root Certificates Library (libtrustroot, -ltrustroot)
+.Sh SYNOPSIS
+.In trustroot/trustroot.h
+.Ft "const trustroot_t *"
+.Fn trustroot_start "void"
+.Ft "const trustroot_t *"
+.Fn trustroot_next "const trustroot_t *"
+.Ft "const char *"
+.Fn trustroot_name "const trustroot_t *"
+.Ft "size_t"
+.Fn trustroot_size "const trustroot_t *"
+.Ft "const unsigned char *"
+.Fn trustroot_data "const trustroot_t *"
 .Sh DESCRIPTION
-The trust system configuration the contents of the trust root set and
-provides the trusted signing keys, allowing users to create signed
-executables (see
-.Xr signed-elf 5)
-as well as other signed assets.  It provides the default keys to
-.Xr signelf 8
-and other utilities, and controls which keys are included in critical
-system components as the builtin trust root set.
+The
+.Nm libtrustroot
+library provides a way to embed the trust
+root certificates directly into applications such as the kernel and
+.Xr loader 8
+in a way that can then be accessed by the applications.  The
+certificates are taken from the trust system configuration (see
+.Xr trust-config 7)
+at the time at which the library is built.  The
+.Nm libtrustroot
+library also provides a simple API for accessing the builtin trust
+roots.
+
+
 .Sh TERMINOLOGY
 The trust configuration controls the behavior of a system consisting
 of several parts with interlocking functions; thus, it is essential to
@@ -164,21 +189,12 @@ However, it is an illegal configuration for there to be a public key
 certificate named
 .Pa /etc/trust/certs/local.pub.pem
 without a corresponding private key.
-.Sh DEFAULT
-The default trust system configuration consists solely of a local
-keypair which is generated during OS installation.  Any additional
-trusted keys (including third-party keys) are signed by the local
-keypair and loaded as intermediate keys rather than being added
-directly to the trust root configuration.  This is the preferred
-configuration, and alternatives should only be used if there is a
-specific and compelling reason to do so.
+
 .Sh SEE ALSO
-.Xr trust 7 ,
-.Xr signed-elf 5 ,
-.Xr signelf 5 ,
-.Xr openssl 1
+.Xr trust-config 7 ,
+.Xr openssl 1 ,
 .Sh HISTORY
-The trust system first appeared in
+The libtrustroot library first appeared in
 .Fx 12.0 .
 .Sh AUTHORS
 This manual page was written by

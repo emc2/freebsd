@@ -29,14 +29,13 @@
 #include <libelf.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdbool.h>
 
 #include "_libelf.h"
 
 ELFTC_VCSID("$Id: elf_data.c 3466 2016-05-11 18:35:44Z emaste $");
 
 Elf_Data *
-_libelf_getdata(Elf_Scn *s, Elf_Data *ed, bool updating)
+elf_getdata(Elf_Scn *s, Elf_Data *ed)
 {
 	Elf *e;
 	unsigned int sh_type;
@@ -95,9 +94,7 @@ _libelf_getdata(Elf_Scn *s, Elf_Data *ed, bool updating)
 
 	if ((elftype = _libelf_xlate_shtype(sh_type)) < ELF_T_FIRST ||
 	    elftype > ELF_T_LAST || (sh_type != SHT_NOBITS &&
-            (!updating &&
-             (sh_offset > e->e_rawsize ||
-              sh_size > e->e_rawsize - sh_offset)))) {
+	    (sh_offset > e->e_rawsize || sh_size > e->e_rawsize - sh_offset))) {
 		LIBELF_SET_ERROR(SECTION, 0);
 		return (NULL);
 	}
@@ -169,12 +166,6 @@ _libelf_getdata(Elf_Scn *s, Elf_Data *ed, bool updating)
 }
 
 Elf_Data *
-elf_getdata(Elf_Scn *s, Elf_Data *ed)
-{
-        return (_libelf_getdata(s, ed, false));
-}
-
-Elf_Data *
 elf_newdata(Elf_Scn *s)
 {
 	Elf *e;
@@ -218,7 +209,7 @@ elf_newdata(Elf_Scn *s)
  */
 
 Elf_Data *
-_libelf_rawdata(Elf_Scn *s, Elf_Data *ed, bool updating)
+elf_rawdata(Elf_Scn *s, Elf_Data *ed)
 {
 	Elf *e;
 	int elf_class;
@@ -263,9 +254,7 @@ _libelf_rawdata(Elf_Scn *s, Elf_Data *ed, bool updating)
 	}
 
 	if (sh_type != SHT_NOBITS &&
-	    (!updating &&
-             (sh_offset > e->e_rawsize ||
-              sh_size > e->e_rawsize - sh_offset))) {
+	    (sh_offset > e->e_rawsize || sh_size > e->e_rawsize - sh_offset)) {
 		LIBELF_SET_ERROR(SECTION, 0);
 		return (NULL);
 	}
@@ -284,10 +273,4 @@ _libelf_rawdata(Elf_Scn *s, Elf_Data *ed, bool updating)
 	STAILQ_INSERT_TAIL(&s->s_rawdata, d, d_next);
 
 	return (&d->d_data);
-}
-
-Elf_Data *
-elf_rawdata(Elf_Scn *s, Elf_Data *ed)
-{
-        return (_libelf_rawdata(s, ed, false));
 }
