@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2017 Eric McCorkle <emc2@metricspace.net>.
+ * Copyright (c) 2018 Eric McCorkle
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -10,21 +10,18 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the author nor the names of any co-contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY Bill Paul AND CONTRIBUTORS ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL Bill Paul OR THE VOICES IN HIS HEAD
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  */
 
 #include <sys/cdefs.h>
@@ -48,7 +45,7 @@ __FBSDID("$FreeBSD$");
 
 #include <openssl/bio.h>
 #include <openssl/evp.h>
-#include <openssl/pkcs7.h>
+#include <openssl/cms.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
@@ -194,18 +191,18 @@ write_ephemeral(void)
         }
 }
 
-static PKCS7 *
+static CMS_ContentInfo *
 make_sig(void *buf, size_t len)
 {
         BIO *bio;
-        PKCS7 *pkcs7;
+        CMS_ContentInfo *cms;
 
         bio = BIO_new_mem_buf(buf, len);
-        pkcs7 = PKCS7_sign(sign_cert, sign_priv, NULL, bio,
-            PKCS7_DETACHED | PKCS7_BINARY | PKCS7_NOCERTS |
-            PKCS7_NOCHAIN | PKCS7_NOSMIMECAP | PKCS7_NOATTR);
+        cms = CMS_sign(sign_cert, sign_priv, NULL, bio,
+            CMS_DETACHED | CMS_BINARY | CMS_NOCERTS |
+            CMS_NOSMIMECAP | CMS_NOATTR);
 
-        return pkcs7;
+        return cms;
 }
 
 static void
@@ -213,12 +210,12 @@ compute_sigsize(void)
 {
         char buf[0];
         int len;
-        PKCS7 *pkcs7 = make_sig(buf, sizeof(buf));
+        CMS_ContentInfo *cms = make_sig(buf, sizeof(buf));
 
-        len = i2d_PKCS7(pkcs7, NULL);
+        len = i2d_CMS_ContentInfo(cms, NULL);
         check_ssl_error("computing signature size");
         sigsize = len;
-        PKCS7_free(pkcs7);
+        CMS_ContentInfo_free(cms);
 }
 
 static int parse_args(const int argc, char* argv[])
@@ -594,7 +591,7 @@ sign_elf(Elf *elf)
         unsigned char *buf;
         size_t filesize;
         void *filedata;
-        PKCS7 *pkcs7;
+        CMS_ContentInfo *cms;
         size_t siglen;
 
         find_first_resizable(elf);
@@ -688,9 +685,9 @@ sign_elf(Elf *elf)
         check_elf_error();
 
         /* Actually compute the signature */
-        pkcs7 = make_sig(filedata, filesize);
+        cms = make_sig(filedata, filesize);
 
-        siglen = i2d_PKCS7(pkcs7, NULL);
+        siglen = i2d_CMS_ContentInfo(cms, NULL);
 
         if(siglen != sigsize) {
                 fprintf(stderr, "Signature size %zu is not expected %zu\n",
@@ -700,7 +697,7 @@ sign_elf(Elf *elf)
 
         /* Write back all the data. */
         buf = data->d_buf;
-        siglen = i2d_PKCS7(pkcs7, &buf);
+        siglen = i2d_CMS_ContentInfo(cms, &buf);
         elf_update(elf, ELF_C_WRITE);
 }
 

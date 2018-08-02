@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2017 Eric McCorkle <emc2@metricspace.net>.
+ * Copyright (c) 2018 Eric McCorkle
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -10,21 +10,18 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the author nor the names of any co-contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY Bill Paul AND CONTRIBUTORS ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL Bill Paul OR THE VOICES IN HIS HEAD
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  */
 
 #include <sys/cdefs.h>
@@ -43,6 +40,7 @@ __FBSDID("$FreeBSD$");
 
 #include <openssl/err.h>
 #include <openssl/pem.h>
+#include <openssl/cms.h>
 #include <openssl/x509.h>
 
 #include "signelf.h"
@@ -142,7 +140,7 @@ verify_elf(Elf *elf, const char path[])
         size_t idx;
         Elf_Scn *scn;
         Elf_Data *data;
-        PKCS7 *pkcs7;
+        CMS_ContentInfo *cms;
         const unsigned char *buf;
         void *ptr;
         size_t filesize;
@@ -166,8 +164,8 @@ verify_elf(Elf *elf, const char path[])
         /* Load the signature */
         buf = data->d_buf;
 
-        pkcs7 = NULL;
-        d2i_PKCS7(&pkcs7, &buf, data->d_size);
+        cms = NULL;
+        d2i_CMS_ContentInfo(&cms, &buf, data->d_size);
         check_ssl_error("parsing signature");
 
         /* Prepare the file data for verification */
@@ -177,8 +175,7 @@ verify_elf(Elf *elf, const char path[])
         check_ssl_error("preparing data");
 
         /* Perform verification */
-        out = PKCS7_verify(pkcs7, verifycerts, NULL, bio, NULL,
-            PKCS7_NOINTERN | PKCS7_NOVERIFY);
+        out = CMS_verify(cms, verifycerts, NULL, bio, NULL, CMS_NOINTERN);
         err = ERR_get_error();
 
         if (err != 0) {

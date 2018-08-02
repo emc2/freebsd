@@ -47,7 +47,7 @@ nature to the
 .Sy .comment
 section and typically will not be included in
 any loadable segment.  The signature data itself is stored as a
-DER-encoded PKCS#7 detached signature, typically without metadata such
+DER-encoded CMS detached signature, typically without metadata such
 as certificates and chains, MIME capabilities, attributes, or other
 such extras.  The signature is computed in binary mode using the
 contents of the entire file, but with the entire
@@ -55,14 +55,14 @@ contents of the entire file, but with the entire
 section
 containing zero data.
 .Ss Ciphers and Hashes
-The PKCS#7 format is designed to allow for a variable selection of
+The CMS format is designed to allow for a variable selection of
 ciphers.  In order to maintain strong security properties, the signed
 ELF specification imposes the following restrictions on ciphers and
 hashes:
 .Bl -bullet -offset indent
 .It
-The allowed hash algorithms are as follows: RipeMD160, SHA256, SHA384,
-SHA512, SHA3 (keccak), skein, and whirlpool.  The default hash is
+The allowed hash algorithms are as follows: SHA256, SHA384, SHA512,
+SHA3 (Keccak), Blake-2b, Skein, and Whirlpool.  The default hash is
 SHA256.
 .It
 RSA digital signatures are allowed with key lengths of 4096 bits or higher
@@ -86,7 +86,7 @@ modification of the ELF file.  The procedure is as follows:
 .It
 The size of the signature is calculated.  (This requires that the
 signature size be invariant with respect to the data being signed- a
-property possessed by PKCS#7 detached signatures.)
+property possessed by CMS detached signatures.)
 .It
 The
 .Sy .sign
@@ -102,7 +102,7 @@ The signature is computed using the entire file as input.
 .It
 The Signature is written into the
 .Sy .sign
-section in PKCS#7 detached
+section in CMS detached
 format using the DER enconding.
 .El
 .Pp
@@ -111,7 +111,7 @@ The verification procedure is as follows:
 .It
 The
 .Sy .sign
-section is located, and the PKCS#7 detached signature is loaded
+section is located, and the CMS detached signature is loaded
 .It
 The
 .Sy .sign
@@ -158,8 +158,13 @@ with signing keys being stored in
 .Pa /etc/trust/priv
 and public key certificates in
 .Pa /etc/trust/certs
-(this allows differing permissions on the two directories).  The
-default public and private keys use for signing locally-produced
+(this allows differing permissions on the two directories), and with
+trust root keys and certificates being stored in a similar fashion
+under
+.Pa /etc/trust/root/priv
+and
+.Pa /etc/trust/root/certs.
+The default public and private keys use for signing locally-produced
 binaries are located at
 .Pa /etc/trust/priv/local.pem
 and
@@ -202,9 +207,9 @@ Where
 is a file exactly as large as a signature which contains zeros.  Next,
 sign the binary:
 .Pp
-.Dl "$ openssl smime -sign -outform DER -md sha256 -binary -nosmimecap \\"
-.Dl "                -nocerts -noattr -signer cert.pem \\"
-.Dl "                -inkey key.pem -in myexe -out signature"
+.Dl "$ openssl cms -sign -outform DER -md sha256 -binary -nosmimecap \\"
+.Dl "              -nocerts -noattr -signer cert.pem \\"
+.Dl "              -inkey key.pem -in myexe -out signature"
 .Pp
 Last, update the
 .Sy .sign
@@ -229,15 +234,15 @@ Now, zero out the signature:
 .Pp
 Last, verify the signature:
 .Pp
-.Dl "$ openssl smime -verify -nointern -inform DER -binary \\"
-.Dl "                -in signature -content signelf -certfile cert.pem \\"
-.Dl "                -CApath /etc/trust/certs -out /dev/null"
+.Dl "$ openssl cms -verify -nointern -inform DER -binary \\"
+.Dl "              -in signature -content signelf -certfile cert.pem \\"
+.Dl "              -CApath /etc/trust/certs -out /dev/null"
 .Pp
 The check against the system trusted keys can be omitted as follows:
 .Pp
-.Dl "$ openssl smime -verify -nointern -noverify -inform DER -binary \\"
-.Dl "                -in signature -content signelf -certfile cert.pem \\"
-.Dl "                -out /dev/null"
+.Dl "$ openssl cms -verify -nointern -noverify -inform DER -binary \\"
+.Dl "              -in signature -content signelf -certfile cert.pem \\"
+.Dl "              -out /dev/null"
 .Pp
 .Ss Deleting Signatures
 Lastly, signatures can be deleted from a file using the
@@ -260,21 +265,21 @@ objects after at the end of all compilation steps.
 .Pp
 As of the time of writing, it is reasonably likely that quantum
 computing devices capable of attacking public-key ciphers will become
-available on a timeline of more than a decade, but less than a century.
-Should this become a reality, the security of RSA- and ECC-based
-public key algorithms will be compromised.  This has major
-implications for any systems utilizing ELF signatures (or public-key
-cryptography generally): namely that such systems should avoid
+available in the foreseeable future.  Should this become a reality, the
+security of RSA- and ECC-based public key algorithms will be compromised.
+This has major implications for any systems utilizing ELF signatures (or
+public-key cryptography generally): namely that such systems should avoid
 hardwired or burned-in keys, that they should assume keys will be
 periodically changed, and that they should incorporate key expiration
-and revocation into their designs.
+and revocation into their designs.  Additionally, users should assume that
+the cipher suite will undergo significant changes to incorporate post-quantum
+ciphers and remove quantum-vulnerable ones.
 .Sh SEE ALSO
-.Xr trust 7 ,
 .Xr trust-config 7 ,
 .Xr elf 5 ,
 .Xr signelf 5 ,
 .Xr openssl 1 ,
-.Xr smime 1 ,
+.Xr cms 1 ,
 .Xr objcopy 1
 .Rs
 .%A Hewlett Packard
@@ -287,7 +292,7 @@ and revocation into their designs.
 .Re
 .Rs
 .%A Internet Engineering Task Force (IETF)
-.%B RFC 2315 (PKCS#7)
+.%B RFC 2315 (CMS)
 .Re
 .Rs
 .%A Daniel J. Bernstein and Tanja Lange.

@@ -57,7 +57,7 @@ The
 .Nm
 utility can generate an ephemeral key-pair for signing a batch of ELF
 binaries.  After signing is complete, the ephemeral private key will
-be discarded (at which point it will be impossible to sign anymore
+be discarded (at which point it will be impossible to sign any more
 binaries with so that the ephemeral public key can verify them), while
 the public key will be written out as a PEM-encoded X509 certificate
 and signed with the user-supplied key-pair.
@@ -98,14 +98,14 @@ Use the private key in
 (which must be a PEM-encoded private key or PKCS#8 store) as the
 private key for signing binaries or the ephemeral key.  If this option
 is not provided, the default private key
-.Pa /etc/trust/priv/local.pem
+.Pa /etc/trust/root/priv/local.pem
 will be used.
 .It Fl p
 Use the PEM-encoded X509 certificate
 .Ar pcert
 as the public key for signing binaries or the ephemeral key.  If this
 option is not provided, the default public key
-.Pa /etc/trust/certs/local.pub.pem
+.Pa /etc/trust/root/certs/local.pub.pem
 will be used.
 .It Fl v
 Generate verbose output.
@@ -139,12 +139,19 @@ with private keys being stored in
 .Pa /etc/trust/priv
 and corresponding public key certificates in
 .Pa /etc/trust/certs
-(this allows differing permissions on the two directories).  The
-default private and public keys are located at
+(this allows differing permissions on the two directories), and with
+trust root keys and certificates being stored in a similar fashion
+in
+.Pa /etc/trust/root/priv
+and
+.Pa /etc/trust/root/certs.
+The default private and public keys are located at
 .Pa /etc/trust/priv/local.pem
 and
 .Pa /etc/trust/certs/local.pub.pem
-respectively.
+respectively.  See the
+.Xr trust-config 5
+man page for more details.
 .Sh WARNINGS
 The
 .Nm
@@ -247,8 +254,9 @@ man page for details.
 .Sh SEE ALSO
 .Xr elf 5 ,
 .Xr signed-elf 5 ,
+.Xr trust-config 5
 .Xr openssl 1 ,
-.Xr pkcs7 1
+.Xr cms 1
 .Sh HISTORY
 The
 .Nm

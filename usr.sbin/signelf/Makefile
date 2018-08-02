@@ -3,7 +3,7 @@
 .include <src.opts.mk>
 
 PROG=signelf
-MAN=signelf.8 trust-config.7
+MAN=signelf.8
 SRCS=signelf.c sign.c verify.c util.c
 
 LIBADD=crypto elf
