@@ -1,0 +1,62 @@
+.\"-
+.\" Copyright (c) 2018 Eric L. McCorkle
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.\" $FreeBSD$
+.\"
+.Dd January 13, 2018
+.Dt TRUST 9
+.Os
+.Sh NAME
+.Nm trust
+.Nd kernel public-key trust database API
+.Sh SYNOPSIS
+.In trust/trust.h
+.Ft int
+.Fn trust_init "unsigned int nroots" "cert_t *roots[]"
+.Ft int
+.Fn trust_expiry_check "time_t"
+.Ft int
+.Fn trust_add_cert "cert_t *"
+.Ft int
+.Fn trust_set_revlist "certid_t *" "revlist_t *"
+
+.Ft int
+.Fn trust_check_sig "sig_t *sig" "revlist_t *"
+
+.Ft int
+.Fn trust_certs "certid_t *parent" "unsigned int *" "cert_t *certsp[]",
+    "int depth" "int flags"
+.Pp
+In the kernel configuration file:
+.Cd "options TRUST"
+The kernel public-key trust database is a hierarchal key-store for
+public signing keys which are trusted by the kernel.  The trust
+database manages trust delegation relationships amongst the keys as
+well as their revocation lists and expiration dates.  The central function
+of the database is to provide signature-checking functionality which
+represents the kernel's notion of trust.
+.Sh AUTHORS
+This manual page was written by
+.An Eric McCorkle .
