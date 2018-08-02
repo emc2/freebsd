@@ -24,75 +24,51 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef _BDXL_TYPE_H_
-#define _BDXL_TYPE_H_
+#ifndef _BDXL_AST_H_
+#define _BDXL_AST_H_
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "bdxl_type.h"
 
-typedef enum bdxl_type_tag_t bdxl_type_tag_t;
-typedef struct bdxl_sint_data_t bdxl_sint_data_t;
-typedef struct bdxl_uint_data_t bdxl_uint_data_t;
-typedef struct bdxl_real_data_t bdxl_real_data_t;
-typedef struct bdxl_seq_data_t bdxl_seq_data_t;
-typedef struct bdxl_seq_field_t bdxl_seq_field_t;
-typedef struct bdxl_choice_data_t bdxl_choice_data_t;
-typedef struct bdxl_choice_opt_t bdxl_choice_opt_t;
-typedef struct bdxl_seq_of_data_t bdxl_seq_of_data_t;
-typedef union bdxl_type_data_t bdxl_type_data_t;
-typedef struct bdxl_type_t bdxl_type_t;
+typedef struct pos_t pos_t;
+typedef struct bdxl_sint_node_data_t bdxl_sint_node_data_t;
+typedef struct bdxl_uint_node_data_t bdxl_uint_node_data_t;
+typedef struct bdxl_real_node_data_t bdxl_real_node_data_t;
+typedef struct bdxl_seq_node_data_t bdxl_seq_node_data_t;
+typedef struct bdxl_seq_field_node_t bdxl_seq_field_node_t;
+typedef struct bdxl_choice_node_data_t bdxl_choice_node_data_t;
+typedef struct bdxl_choice_opt_node_t bdxl_choice_opt_node_t;
+typedef struct bdxl_seq_of_node_data_t bdxl_seq_of_node_data_t;
+typedef union bdxl_type_node_data_t bdxl_type_node_data_t;
+typedef struct bdxl_type_node_t bdxl_type_node_t;
 
 /*!
- * \brief Type tags for BDXL.
+ * \brief File positions for a tree element.
  */
-enum bdxl_type_tag_t {
+struct pos_t {
         /*!
-         * \brief Unit type.
-         *
-         * This is a similar to a C void, except it can be declared.
-         * It is often used with BDXL_TYPE_CHOICE to implement
-         * variants that have no data (enums can be implemented this
-         * way).
+         * \brief Name of the file.
          */
-        BDXL_TYPE_UNIT,
+        const char *fname;
         /*!
-         * \brief Boolean type.
+         * \brief Line number.
          */
-        BDXL_TYPE_BOOL,
+        unsigned int line;
         /*!
-         * \brief Signed integer types.
+         * \brief Inclusive starting column.
          */
-        BDXL_TYPE_SINT,
+        unsigned int startcol;
         /*!
-         * \brief Unsigned integer types.
+         * \brief Inclusive ending column.
          */
-        BDXL_TYPE_UINT,
-        /*!
-         * \brief Real-like types (float, double).
-         */
-        BDXL_TYPE_REAL,
-        /*!
-         * \brief String types.
-         */
-        BDXL_TYPE_STRING,
-        /*!
-         * \brief Sequences, consisting of ordered named unique fields.
-         */
-        BDXL_TYPE_SEQ,
-        /*!
-         * \brief Choices, consisting of one or more named variants.
-         */
-        BDXL_TYPE_CHOICE,
-        /*!
-         * \brief  Unordered sequences of elements having the same type.
-         */
-        BDXL_TYPE_SEQ_OF,
+        unsigned int endcol;
 };
 
 /*!
  * \brief Signed integer data.
  */
-struct bdxl_sint_data_t {
+struct bdxl_sint_node_data_t {
         /*!
          * \brief Lower bound on the signed integer.
          */
@@ -106,7 +82,7 @@ struct bdxl_sint_data_t {
 /*!
  * \brief Unsigned integer data.
  */
-struct bdxl_uint_data_t {
+struct bdxl_uint_node_data_t {
         /*!
          * \brief Lower bound on the unsigned integer.
          */
@@ -120,7 +96,7 @@ struct bdxl_uint_data_t {
 /*!
  * \brief Real-approximation types (double, float, etc.).
  */
-struct bdxl_real_data_t {
+struct bdxl_real_node_data_t {
         /*!
          * \brief Lower bound on the real value.
          */
@@ -134,15 +110,19 @@ struct bdxl_real_data_t {
 /*!
  * \brief Fields for sequential types.
  */
-struct bdxl_seq_field_t {
+struct bdxl_seq_field_node_t {
+        /*!
+         * \brief Position in source that this node represents.
+         */
+        pos_t pos;
         /*!
          * \brief The field's name.
          */
-        char* name;
+        const char *name;
         /*!
          * \brief The field's type descriptor.
          */
-        bdxl_type_t *type;
+        bdxl_type_node_t *type;
 };
 
 /*!
@@ -150,7 +130,7 @@ struct bdxl_seq_field_t {
  *
  * These include structures, sequences, and sets.
  */
-struct bdxl_seq_data_t {
+struct bdxl_seq_node_data_t {
         /*!
          * \brief Whether the fields are ordered.
          */
@@ -162,27 +142,31 @@ struct bdxl_seq_data_t {
         /*!
          * \brief Field descriptors.
          */
-        bdxl_seq_field_t fields[];
+        bdxl_seq_field_node_t fields[];
 };
 
 /*!
  * \brief Fields for choice types.
  */
-struct bdxl_choice_opt_t {
+struct bdxl_choice_opt_node_t {
+        /*!
+         * \brief Position in source that this node represents.
+         */
+        pos_t pos;
         /*!
          * \brief The option's name.
          */
-        char* name;
+        const char *name;
         /*!
          * \brief The option's type descriptor.
          */
-        bdxl_type_t *type;
+        bdxl_type_node_t *type;
 };
 
 /*!
  * \brief Choice types.  These are tagged, disjoint unions.
  */
-struct bdxl_choice_data_t {
+struct bdxl_choice_node_data_t {
         /*!
          * \brief Number of option descriptors.
          */
@@ -190,54 +174,75 @@ struct bdxl_choice_data_t {
         /*!
          * \brief Option descriptors.
          */
-        bdxl_choice_opt_t options[];
+        bdxl_choice_opt_node_t options[];
 };
 
 /*!
  * \brief Sequence-of types.
  */
-struct bdxl_seq_of_data_t {
-        unsigned int minlen;
-        unsigned int maxlen;
+struct bdxl_seq_of_node_data_t {
+        /*!
+         * \brief Minimum number of elements (can be 0).
+         */
+        unsigned int minsize;
+        /*!
+         * \brief Minimum number of elements (can be 0).
+         */
+        unsigned int maxsize;
+        /*!
+         * \brief Whether or not elements are unique.
+         */
         bool unique;
+        /*!
+         * \brief Whether or not the ordering of elements matters.
+         *
+         * Note: this does NOT imply that the sequence is sorted.
+         */
         bool ordered;
-        bdxl_type_t *elemtype;
+        /*!
+         * \brief The type of sequence elements.
+         */
+        bdxl_type_node_t *elemtype;
 };
 
 /*!
  * \brief Family-specific type descriptors.
  */
-union bdxl_type_data_t {
+union bdxl_type_node_data_t {
         /*!
          * \brief Data for BDXL_TYPE_SINT.
          */
-        bdxl_sint_data_t sint_data;
+        bdxl_sint_node_data_t sint_data;
         /*!
          * \brief Data for BDXL_TYPE_UINT.
          */
-        bdxl_uint_data_t uint_data;
+        bdxl_uint_node_data_t uint_data;
         /*!
          * \brief Data for BDXL_TYPE_REAL.
          */
-        bdxl_real_data_t real_data;
+        bdxl_real_node_data_t real_data;
         /*!
          * \brief Data for BDXL_TYPE_SEQ.
          */
-        bdxl_seq_data_t seq_data;
+        bdxl_seq_node_data_t seq_data;
         /*!
          * \brief Data for BDXL_TYPE_CHOICE.
          */
-        bdxl_choice_data_t choice_data;
+        bdxl_choice_node_data_t choice_data;
         /*!
          * \brief Data for BDXL_TYPE_SEQ_OF.
          */
-        bdxl_seq_of_data_t seq_of_data;
+        bdxl_seq_of_node_data_t seq_of_data;
 };
 
 /*!
  * \brief Type descriptor.
  */
-struct bdxl_type_t {
+struct bdxl_type_node_t {
+        /*!
+         * \brief Position in source that this node represents.
+         */
+        pos_t pos;
         /*!
          * \brief Tag indicating the family of the type.
          */
@@ -245,7 +250,25 @@ struct bdxl_type_t {
         /*!
          * \brief Tag-specific metadata about the type.
          */
-        bdxl_type_data_t data;
+        bdxl_type_node_data_t data;
 };
+
+/*!
+ * \brief Recursively free a bdxl_seq_field_node_t.
+ * \param node The bdxl_seq_field_node_t to free.
+ */
+extern void bdxl_seq_field_node_free(bdxl_seq_field_node_t *node);
+
+/*!
+ * \brief Recursively free a bdxl_choice_opt_node_t.
+ * \param node The bdxl_choice_opt_node_t to free.
+ */
+extern void bdxl_choice_opt_node_free(bdxl_choice_opt_node_t *node);
+
+/*!
+ * \brief Recursively free a bdxl_type_node_t.
+ * \param node The bdxl_type_node_t to free.
+ */
+extern void bdxl_type_node_free(bdxl_type_node_t *node);
 
 #endif
