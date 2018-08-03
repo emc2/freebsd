@@ -80,6 +80,17 @@
         ..
         syslog.d
         ..
+        trust
+            certs
+            ..
+            priv
+            ..
+            root
+                certs
+                ..
+                priv
+                ..
+        ..
         zfs
         ..
     ..

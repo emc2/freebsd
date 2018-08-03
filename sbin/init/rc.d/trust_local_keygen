@@ -1,0 +1,62 @@
+#!/bin/sh
+#
+# $FreeBSD$
+#
+
+# PROVIDE: trust_local_keygen
+# REQUIRE: FILESYSTEMS
+# KEYWORD: nojail
+
+. /etc/rc.subr
+
+name="trust_local_keygen"
+desc="Generate Local Trust Root Keypair"
+rcvar="trust_local_keygen_enable"
+start_cmd="do_trust_local_keygen"
+stop_cmd=":"
+
+do_trust_local_keygen()
+{
+        if [ -d /etc/trust/root/priv &&
+                 ! -f /etc/trust/root/priv/local.pem ]; then
+                echo "Generating local trust root keypair"
+                openssl genpkey \
+                        -out /etc/trust/root/priv/local.pem \
+                        -algorithm ${trust_local_genpkey_alg} \
+                        ${trust_local_genpkey_opts}
+
+                openssl req -new \
+                        -key /etc/trust/root/priv/local.pem \
+                        -out /tmp/local.csr \
+                        -subj ${trust_local_req_DN} \
+                        -days ${trust_local_req_days} \
+                        ${trust_local_req_opts}
+
+                rm -f /tmp/local.ext
+                touch /tmp/local.ext
+
+                if [ ! -z "${trust_local_x509_key_usage}" ]; then
+                        echo "keyUsage=${trust_local_x509_key_usage}" >> \
+                             /tmp/local.ext
+                fi
+
+                if [ ! -z "${trust_local_x509_ext_key_usage}" ]; then
+                        echo "extendedKeyUsage=${trust_local_x509_ext_key_usage}" >> \
+                             /tmp/local.ext
+                fi
+
+                if [ ! -z "${trust_local_x509_extensions}" ]; then
+                        printf "${trust_local_x509_extensions}" >> \
+                               /tmp/local.ext
+                fi
+
+                openssl x509 -req \
+                        -in /tmp/local.csr \
+                        -out /etc/trust/root/certs/local.pub.pem \
+                        -extfile /tmp/local.extensions \
+                        -signkey ${trust_local_x509_signkey} \
+                        ${trust_local_x509_opts}
+
+                rm /tmp/local.csr
+        fi
+}
