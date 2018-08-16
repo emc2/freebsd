@@ -25,7 +25,16 @@
  */
 
 #include "trustroot.h"
+
+struct trustroot_t {
+  const char *name;
+  size_t size;
+  const unsigned char *data;
+};
+
 #include "rootcerts.h"
+
+static const size_t ntrustroots = sizeof(trustroots) / sizeof(trustroots[0]);
 
 const trustroot_t *trustroot_start(void) {
         return (trustroots);
