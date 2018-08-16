@@ -1,0 +1,62 @@
+#!/bin/sh
+#
+# $FreeBSD$
+#
+
+# PROVIDE: trust_machine_keygen
+# REQUIRE: FILESYSTEMS
+# KEYWORD: nojail
+
+. /etc/rc.subr
+
+name="trust_machine_keygen"
+desc="Generate Machine Trust Root Keypair"
+rcvar="trust_machine_keygen_enable"
+start_cmd="do_trust_machine_keygen"
+stop_cmd=":"
+
+do_trust_machine_keygen()
+{
+        if [ -d /etc/trust/root/priv &&
+                 ! -f /etc/trust/root/priv/machine.pem ]; then
+                echo "Generating machine trust root keypair"
+                openssl genpkey \
+                        -out /etc/trust/root/priv/machine.pem \
+                        -algorithm ${trust_machine_genpkey_alg} \
+                        ${trust_machine_genpkey_opts}
+
+                openssl req -new \
+                        -key /etc/trust/root/priv/machine.pem \
+                        -out /tmp/machine.csr \
+                        -subj ${trust_machine_req_DN} \
+                        -days ${trust_machine_req_days} \
+                        ${trust_machine_req_opts}
+
+                rm -f /tmp/machine.ext
+                touch /tmp/machine.ext
+
+                if [ ! -z "${trust_machine_x509_key_usage}" ]; then
+                        echo "keyUsage=${trust_machine_x509_key_usage}" >> \
+                             /tmp/machine.ext
+                fi
+
+                if [ ! -z "${trust_machine_x509_ext_key_usage}" ]; then
+                        echo "extendedKeyUsage=${trust_machine_x509_ext_key_usage}" >> \
+                             /tmp/machine.ext
+                fi
+
+                if [ ! -z "${trust_machine_x509_extensions}" ]; then
+                        printf "${trust_machine_x509_extensions}" >> \
+                               /tmp/machine.ext
+                fi
+
+                openssl x509 -req \
+                        -in /tmp/machine.csr \
+                        -out /etc/trust/root/certs/machine.pub.pem \
+                        -extfile /tmp/machine.ext \
+                        -signkey ${trust_machine_x509_signkey} \
+                        ${trust_machine_x509_opts}
+
+                rm /tmp/machine.csr
+        fi
+}

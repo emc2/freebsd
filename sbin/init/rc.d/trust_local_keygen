@@ -4,7 +4,7 @@
 #
 
 # PROVIDE: trust_local_keygen
-# REQUIRE: FILESYSTEMS
+# REQUIRE: FILESYSTEMS trust_machine_keygen
 # KEYWORD: nojail
 
 . /etc/rc.subr
@@ -17,16 +17,16 @@ stop_cmd=":"
 
 do_trust_local_keygen()
 {
-        if [ -d /etc/trust/root/priv &&
-                 ! -f /etc/trust/root/priv/local.pem ]; then
+        if [ -d /etc/trust/priv &&
+                 ! -f /etc/trust/priv/local.pem ]; then
                 echo "Generating local trust root keypair"
                 openssl genpkey \
-                        -out /etc/trust/root/priv/local.pem \
+                        -out /etc/trust/priv/local.pem \
                         -algorithm ${trust_local_genpkey_alg} \
                         ${trust_local_genpkey_opts}
 
                 openssl req -new \
-                        -key /etc/trust/root/priv/local.pem \
+                        -key /etc/trust/priv/local.pem \
                         -out /tmp/local.csr \
                         -subj ${trust_local_req_DN} \
                         -days ${trust_local_req_days} \
@@ -52,8 +52,8 @@ do_trust_local_keygen()
 
                 openssl x509 -req \
                         -in /tmp/local.csr \
-                        -out /etc/trust/root/certs/local.pub.pem \
-                        -extfile /tmp/local.extensions \
+                        -out /etc/trust/certs/local.pub.pem \
+                        -extfile /tmp/local.ext \
                         -signkey ${trust_local_x509_signkey} \
                         ${trust_local_x509_opts}
 
