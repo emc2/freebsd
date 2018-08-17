@@ -85,10 +85,14 @@
             ..
             priv
             ..
+            reqs
+            ..
             root
                 certs
                 ..
                 priv
+                ..
+                reqs
                 ..
         ..
         zfs
