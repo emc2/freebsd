@@ -15,48 +15,80 @@ rcvar="trust_machine_keygen_enable"
 start_cmd="do_trust_machine_keygen"
 stop_cmd=":"
 
+generate_keys()
+{
+        echo "Generating machine trust root keypair"
+        openssl genpkey \
+                -out /etc/trust/root/priv/machine.pem \
+                -algorithm ${trust_machine_genpkey_alg} \
+                ${trust_machine_genpkey_opts}
+
+        openssl req -new \
+                -key /etc/trust/root/priv/machine.pem \
+                -out /etc/trust/root/reqs/machine.csr \
+                -subj ${trust_machine_req_DN} \
+                -days ${trust_machine_req_days} \
+                ${trust_machine_req_opts}
+
+        rm -f /etc/trust/root/reqs/machine.ext
+        touch /etc/trust/root/reqs/machine.ext
+
+        if [ ! -z "${trust_machine_x509_key_usage}" ]; then
+                echo "keyUsage=${trust_machine_x509_key_usage}" >> \
+                     /tmp/machine.ext
+        fi
+
+        if [ ! -z "${trust_machine_x509_ext_key_usage}" ]; then
+                echo "extendedKeyUsage=${trust_machine_x509_ext_key_usage}" >> \
+                     /tmp/machine.ext
+        fi
+
+        if [ ! -z "${trust_machine_x509_extensions}" ]; then
+                printf "${trust_machine_x509_extensions}" >> \
+                       /tmp/machine.ext
+        fi
+
+        openssl x509 -req \
+                -in /etc/trust/root/reqs/machine.csr \
+                -out /etc/trust/root/certs/machine.pub.pem \
+                -extfile /etc/trust/root/reqs/machine.ext \
+                -signkey ${trust_machine_x509_signkey} \
+                ${trust_machine_x509_opts}
+
+        rm /tmp/machine.csr
+
+}
+
 do_trust_machine_keygen()
 {
-        if [ -d /etc/trust/root/priv &&
-                 ! -f /etc/trust/root/priv/machine.pem ]; then
-                echo "Generating machine trust root keypair"
-                openssl genpkey \
-                        -out /etc/trust/root/priv/machine.pem \
-                        -algorithm ${trust_machine_genpkey_alg} \
-                        ${trust_machine_genpkey_opts}
+        STARTDATE = `openssl x509
+                             -enddate
+                             -in /etc/trust/root/certs/local.pub.pem
+                             -noout |
+                     sed s/notAfter=//`
+        ENDDATE = `openssl x509
+                           -startdate
+                           -in /etc/trust/root/certs/local.pub.pem
+                           -noout |
+                   sed s/notBefore=//`
+        NOWSTAMP = `date -j -f "%a %b %d %T %Z %Y" "`date`" "+%s"`
+        STARTSTAMP = `date -j -f "%b %d %T %Y %Z" "${STARTDATE}" "+%s"`
+        ENDSTAMP = `date -j -f "%b %d %T %Y %Z" "${ENDDATE}" "+%s"`
 
-                openssl req -new \
-                        -key /etc/trust/root/priv/machine.pem \
-                        -out /tmp/machine.csr \
-                        -subj ${trust_machine_req_DN} \
-                        -days ${trust_machine_req_days} \
-                        ${trust_machine_req_opts}
+        if [ -d /etc/trust/root/priv && \
+             ! -f /etc/trust/root/priv/machine.pem ]; then
+                generate_keys
+        elif [ ${NOWSTAMP} -lt ${STARTSTAMP}]; then
+                echo "WARNING: machine keypair is only valid in the future (${STARTDATE})"
 
-                rm -f /tmp/machine.ext
-                touch /tmp/machine.ext
-
-                if [ ! -z "${trust_machine_x509_key_usage}" ]; then
-                        echo "keyUsage=${trust_machine_x509_key_usage}" >> \
-                             /tmp/machine.ext
+                if [ ${trust_machine_key_regen} ]; then
+                        generate_keys
                 fi
+        elif [ ${NOWSTAMP} -gt ${ENDSTAMP} ]; then
+                echo "WARNING: machine keypair expired at ${ENDDATE}"
 
-                if [ ! -z "${trust_machine_x509_ext_key_usage}" ]; then
-                        echo "extendedKeyUsage=${trust_machine_x509_ext_key_usage}" >> \
-                             /tmp/machine.ext
+                if [ ${trust_machine_key_regen} ]; then
+                        generate_keys
                 fi
-
-                if [ ! -z "${trust_machine_x509_extensions}" ]; then
-                        printf "${trust_machine_x509_extensions}" >> \
-                               /tmp/machine.ext
-                fi
-
-                openssl x509 -req \
-                        -in /tmp/machine.csr \
-                        -out /etc/trust/root/certs/machine.pub.pem \
-                        -extfile /tmp/machine.ext \
-                        -signkey ${trust_machine_x509_signkey} \
-                        ${trust_machine_x509_opts}
-
-                rm /tmp/machine.csr
         fi
 }
