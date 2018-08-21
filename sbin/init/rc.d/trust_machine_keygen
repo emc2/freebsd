@@ -25,9 +25,13 @@ generate_keys()
                 ${trust_machine_genpkey_opts}
 
         if [ -z ${trust_machine_req_DN} ]; then
+            IFS="."
+
             for dc in `hostname`; do
                 trust_machine_req_DN="${trust_machine_req_DN}/DC=${dc}"
             done
+
+            IFS="\n"
 
             trust_machine_req_DN="${trust_machine_req_DN}/OU=trust/CN=machine"
         fi

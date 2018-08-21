@@ -26,9 +26,13 @@ generate_keys()
                 ${trust_local_genpkey_opts}
 
         if [ -z ${trust_local_req_DN} ]; then
+            IFS="."
+
             for dc in `hostname`; do
                 trust_local_req_DN="${trust_local_req_DN}/DC=${dc}"
             done
+
+            IFS="\n"
 
             trust_local_req_DN="${trust_local_req_DN}/OU=trust/CN=local"
         fi
