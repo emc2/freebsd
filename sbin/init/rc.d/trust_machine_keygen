@@ -24,6 +24,14 @@ generate_keys()
                 -algorithm ${trust_machine_genpkey_alg} \
                 ${trust_machine_genpkey_opts}
 
+        if [ -z ${trust_machine_req_DN} ]; then
+            for dc in `hostname`; do
+                trust_machine_req_DN="${trust_machine_req_DN}/DC=${dc}"
+            done
+
+            trust_machine_req_DN="${trust_machine_req_DN}/OU=trust/CN=machine"
+        fi
+
         openssl req -new \
                 -key /etc/trust/root/priv/machine.pem \
                 -out /etc/trust/root/reqs/machine.csr \

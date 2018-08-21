@@ -25,6 +25,14 @@ generate_keys()
                 -algorithm ${trust_local_genpkey_alg} \
                 ${trust_local_genpkey_opts}
 
+        if [ -z ${trust_local_req_DN} ]; then
+            for dc in `hostname`; do
+                trust_local_req_DN="${trust_local_req_DN}/DC=${dc}"
+            done
+
+            trust_local_req_DN="${trust_local_req_DN}/OU=trust/CN=local"
+        fi
+
         openssl req -new \
                 -key /etc/trust/priv/local.pem \
                 -out /etc/trust/reqs/local.csr \
@@ -55,7 +63,9 @@ generate_keys()
                 -out /etc/trust/certs/local.pub.pem \
                 -days ${trust_local_req_days} \
                 -extfile /etc/trust/reqs/local.ext \
-                -signkey ${trust_local_x509_signkey} \
+                -CAkey ${trust_local_x509_signkey} \
+                -CA ${trust_local_x509_signcert} \
+                -CAcreateserial \
                 ${trust_local_x509_opts}
 }
 
