@@ -9,11 +9,13 @@
 
 . /etc/rc.subr
 
+
 name="trust_local_keygen"
 desc="Generate Local Intermediate Trust Keypair"
 rcvar="trust_local_keygen_enable"
 start_cmd="do_trust_local_keygen"
 stop_cmd=":"
+load_rc_config $name
 
 generate_keys()
 {
@@ -35,60 +37,67 @@ generate_keys()
 
         if [ ! -z "${trust_local_x509_key_usage}" ]; then
                 echo "keyUsage=${trust_local_x509_key_usage}" >> \
-                     /tmp/local.ext
+                     /etc/trust/reqs/local.ext
         fi
 
         if [ ! -z "${trust_local_x509_ext_key_usage}" ]; then
                 echo "extendedKeyUsage=${trust_local_x509_ext_key_usage}" >> \
-                     /tmp/local.ext
+                     /etc/trust/reqs/local.ext
         fi
 
         if [ ! -z "${trust_local_x509_extensions}" ]; then
                 printf "${trust_local_x509_extensions}" >> \
-                       /tmp/local.ext
+                       /etc/trust/reqs/local.ext
         fi
 
         openssl x509 -req \
                 -in /etc/trust/reqs/local.csr \
                 -out /etc/trust/certs/local.pub.pem \
+                -days ${trust_local_req_days} \
                 -extfile /etc/trust/reqs/local.ext \
                 -signkey ${trust_local_x509_signkey} \
                 ${trust_local_x509_opts}
-
-        rm /tmp/local.csr
-
 }
 
 do_trust_local_keygen()
 {
-        STARTDATE = `openssl x509
-                             -enddate
-                             -in /etc/trust/root/certs/local.pub.pem
-                             -noout |
-                     sed s/notAfter=//`
-        ENDDATE = `openssl x509
-                           -startdate
-                           -in /etc/trust/root/certs/local.pub.pem
-                           -noout |
-                   sed s/notBefore=//`
-        NOWSTAMP = `date -j -f "%a %b %d %T %Z %Y" "`date`" "+%s"`
-        STARTSTAMP = `date -j -f "%b %d %T %Y %Z" "${STARTDATE}" "+%s"`
-        ENDSTAMP = `date -j -f "%b %d %T %Y %Z" "${ENDDATE}" "+%s"`
+        local _nowdate _startdate _enddate _nowstamp _startstamp _endstamp
 
-        if [ -d /etc/trust/root/priv && \
+        if [ -d /etc/trust/priv -a \
              ! -f /etc/trust/priv/local.pem ]; then
                 generate_keys
-        elif [ ${NOWSTAMP} -lt ${STARTSTAMP}]; then
-                echo "WARNING: local keypair is only valid in the future (${STARTDATE})"
+        else
+                _nowdate=`date`
+                _startdate=`openssl x509 \
+                                    -startdate \
+                                    -in /etc/trust/certs/local.pub.pem \
+                                    -noout | \
+                            sed s/notBefore=//`
+                _enddate=`openssl x509 \
+                                  -enddate \
+                                  -in /etc/trust/certs/local.pub.pem \
+                                  -noout | \
+                          sed s/notAfter=//`
+                _nowstamp=`date -j -f "%a %b %d %T %Z %Y" "${_nowdate}" "+%s"`
+                _startstamp=`date -j -f "%b %d %T %Y %Z" "${_startdate}" "+%s"`
+                _endstamp=`date -j -f "%b %d %T %Y %Z" "${_enddate}" "+%s"`
 
-                if [ ${trust_local_key_regen} ]; then
-                        generate_keys
-                fi
-        elif [ ${NOWSTAMP} -gt ${ENDSTAMP} ]; then
-                echo "WARNING: local keypair expired at ${ENDDATE}"
+                if [ ${_nowstamp} -lt ${_startstamp} ]; then
+                        echo "WARNING: local keypair is only valid in the future (${_startdate})"
 
-                if [ ${trust_local_key_regen} ]; then
-                        generate_keys
+                        case ${trust_local_key_regen} in
+                            [Nn][Oo]) echo "Not regenerating local keypair" ;;
+                            [Yy][Ee][Ss]) generate_keys ;;
+                        esac
+                elif [ ${_nowstamp} -gt ${_endstamp} ]; then
+                        echo "WARNING: local keypair expired at ${_enddate}"
+
+                        case ${trust_local_key_regen} in
+                            [Nn][Oo]) echo "Not regenerating local keypair" ;;
+                            [Yy][Ee][Ss]) generate_keys ;;
+                        esac
                 fi
         fi
 }
+
+run_rc_command "$1"

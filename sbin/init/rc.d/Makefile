@@ -116,6 +116,8 @@ CONFS=	DAEMON \
 	sysctl \
 	syslogd \
 	tmp \
+	trust_local_keygen \
+	trust_machine_keygen \
 	${_ubthidhci} \
 	ugidfw \
 	${_utx} \

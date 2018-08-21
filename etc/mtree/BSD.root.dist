@@ -83,17 +83,18 @@
         trust
             certs
             ..
-            priv
+            priv        mode=0700
             ..
             reqs
             ..
             root
                 certs
                 ..
-                priv
+                priv    mode=0700
                 ..
                 reqs
                 ..
+            ..
         ..
         zfs
         ..
